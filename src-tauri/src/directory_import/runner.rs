@@ -13,8 +13,9 @@ use super::policy::{
     OrderedWindow, PayloadKind, Reservation, StageBudget, IMPORT_STAGE_BUDGET_BYTES,
 };
 use super::types::{
-    DirectoryProgress, EntrySource, ExistingPlacement, FolderTarget, ImportCounts, ImportIssue,
-    ImportIssueKind, ImportJobStatus, ImportOptions, ImportPerformance, ScannedEntry, ScannedEpub,
+    DirectoryProgress, EntrySource, ExistingPlacement, FolderTarget, ImportAnchor, ImportCounts,
+    ImportIssue, ImportIssueKind, ImportJobStatus, ImportOptions, ImportPerformance, ScannedEntry,
+    ScannedEpub,
 };
 use crate::android_uri_bridge::RestrictedReader;
 use crate::linked_library::{
@@ -69,12 +70,15 @@ fn select_payload_kind(source: &EntrySource, copy: bool) -> PayloadKind {
 struct TargetSpec {
     folder_id: String,
     create_name: Option<String>,
+    parent_folder_id: Option<String>,
+    parent_group_key: Option<String>,
 }
 
 struct PreparedSuccess {
     ordinal: usize,
     input_id: String,
     group_key: Option<String>,
+    direct_folder_id: Option<String>,
     content_hash: String,
     file_name: String,
     metadata: ImportedMetadata,
@@ -91,6 +95,7 @@ impl PreparedSuccess {
             + self.input_id.capacity()
             + self.file_name.capacity()
             + self.group_key.as_ref().map_or(0, String::capacity)
+            + self.direct_folder_id.as_ref().map_or(0, String::capacity)
             + self.content_hash.capacity()
             + metadata.title.capacity()
             + metadata.creator.capacity()
@@ -106,6 +111,7 @@ struct PrepareTask {
     ordinal: usize,
     entry: ScannedEntry,
     group_key: Option<String>,
+    direct_folder_id: Option<String>,
     kind: PayloadKind,
     reservation: Reservation,
 }
@@ -136,6 +142,7 @@ fn admit_preparations(
                 ordinal: planned.ordinal,
                 entry: entry.clone(),
                 group_key: planned.group_key.clone(),
+                direct_folder_id: planned.direct_folder_id.clone(),
                 kind,
                 reservation,
             },
@@ -406,7 +413,8 @@ impl RunnerState {
         let mut published_items: Vec<PreparedSuccess> = Vec::new();
         let mut placements: Vec<DirectoryPlacementRequest> = Vec::new();
         let mut group_targets: Vec<(String, String)> = Vec::new();
-        let mut create_specs: HashMap<String, String> = HashMap::new();
+        let mut create_specs: HashMap<String, DirectoryFolderCreate> = HashMap::new();
+        let folder_specs = self.folder_specs();
 
         for mut item in batch {
             if self.seen.winner(&item.content_hash).is_some() {
@@ -456,26 +464,27 @@ impl RunnerState {
                     } else {
                         self.counts.imported += 1;
                     }
-                    if let Some(group_key) = &item.group_key {
-                        if let Some(target) = self.target_specs.get(group_key) {
-                            if !group_targets
-                                .iter()
-                                .any(|(existing, _)| existing == group_key)
-                            {
-                                group_targets.push((group_key.clone(), target.folder_id.clone()));
-                            }
-                            if let Some(name) = &target.create_name {
-                                create_specs
-                                    .entry(target.folder_id.clone())
-                                    .or_insert_with(|| name.clone());
-                            }
-                            placements.push(DirectoryPlacementRequest {
-                                content_hash: item.content_hash.clone(),
-                                target_folder_id: Some(target.folder_id.clone()),
-                                is_existing_book: item.observed.is_existing_book,
-                                observed: item.observed.clone(),
-                            });
-                        }
+                    let target_folder_id = if let Some(group_key) = &item.group_key {
+                        self.target_specs.get(group_key).map(|target| {
+                            collect_group_chain(group_key, &self.target_specs, &mut group_targets);
+                            collect_creates(
+                                &target.folder_id,
+                                &folder_specs,
+                                &mut create_specs,
+                                &mut std::collections::HashSet::new(),
+                            );
+                            target.folder_id.clone()
+                        })
+                    } else {
+                        item.direct_folder_id.clone()
+                    };
+                    if let Some(target_folder_id) = target_folder_id {
+                        placements.push(DirectoryPlacementRequest {
+                            content_hash: item.content_hash.clone(),
+                            target_folder_id: Some(target_folder_id),
+                            is_existing_book: item.observed.is_existing_book,
+                            observed: item.observed.clone(),
+                        });
                     }
                     published_items.push(item);
                 }
@@ -505,10 +514,7 @@ impl RunnerState {
             .map(|item| (item.content_hash.clone(), item.input_id.clone()))
             .collect();
         if !placements.is_empty() {
-            let creates: Vec<DirectoryFolderCreate> = create_specs
-                .into_iter()
-                .map(|(folder_id, name)| DirectoryFolderCreate { folder_id, name })
-                .collect();
+            let creates: Vec<DirectoryFolderCreate> = create_specs.into_values().collect();
             let binding_rows: Vec<DirectoryBindingWrite> = group_targets
                 .into_iter()
                 .map(|(directory_key, folder_id)| DirectoryBindingWrite {
@@ -677,17 +683,110 @@ fn target_specs(
     targets: &[FolderTarget],
 ) -> Result<HashMap<String, TargetSpec>, String> {
     let by_group = validate_targets(plan, targets)?;
+    let mut folder_by_group: HashMap<String, String> = HashMap::new();
+    for group in &plan.groups {
+        let target = by_group
+            .get(&group.group_key)
+            .ok_or_else(|| format!("targets 缺少目录分组：{}", group.group_key))?;
+        folder_by_group.insert(group.group_key.clone(), target.folder_id().to_string());
+    }
     let mut specs = HashMap::new();
-    for (group_key, target) in by_group {
+    for group in &plan.groups {
+        let target = by_group
+            .get(&group.group_key)
+            .ok_or_else(|| format!("targets 缺少目录分组：{}", group.group_key))?;
+        let parent_folder_id = match &group.parent_group_key {
+            Some(parent) => Some(
+                folder_by_group
+                    .get(parent)
+                    .ok_or_else(|| format!("targets 缺少父目录分组：{parent}"))?
+                    .clone(),
+            ),
+            None => plan.anchor_folder_id.clone(),
+        };
         specs.insert(
-            group_key,
+            group.group_key.clone(),
             TargetSpec {
                 folder_id: target.folder_id().to_string(),
                 create_name: target.create_name().map(str::to_string),
+                parent_folder_id,
+                parent_group_key: group.parent_group_key.clone(),
             },
         );
     }
     Ok(specs)
+}
+
+impl RunnerState {
+    fn folder_specs(&self) -> HashMap<String, TargetSpec> {
+        let mut by_folder = HashMap::new();
+        for spec in self.target_specs.values() {
+            insert_prefer_create(&mut by_folder, spec);
+        }
+        by_folder
+    }
+}
+
+fn insert_prefer_create(by_folder: &mut HashMap<String, TargetSpec>, spec: &TargetSpec) {
+    match by_folder.entry(spec.folder_id.clone()) {
+        std::collections::hash_map::Entry::Vacant(entry) => {
+            entry.insert(spec.clone());
+        }
+        std::collections::hash_map::Entry::Occupied(mut entry) => {
+            if entry.get().create_name.is_none() && spec.create_name.is_some() {
+                entry.insert(spec.clone());
+            }
+        }
+    }
+}
+
+fn collect_creates(
+    folder_id: &str,
+    folder_specs: &HashMap<String, TargetSpec>,
+    creates: &mut HashMap<String, DirectoryFolderCreate>,
+    visiting: &mut std::collections::HashSet<String>,
+) {
+    if !visiting.insert(folder_id.to_string()) {
+        return;
+    }
+    if let Some(spec) = folder_specs.get(folder_id) {
+        // A reused folder already has its own ancestry; only a newly created
+        // node needs its parent target materialized.
+        let Some(name) = &spec.create_name else {
+            return;
+        };
+        creates
+            .entry(folder_id.to_string())
+            .or_insert_with(|| DirectoryFolderCreate {
+                folder_id: folder_id.to_string(),
+                name: name.clone(),
+                parent_id: spec.parent_folder_id.clone(),
+            });
+        if let Some(parent) = &spec.parent_folder_id {
+            collect_creates(parent, folder_specs, creates, visiting);
+        }
+    }
+}
+
+fn collect_group_chain(
+    group_key: &str,
+    target_specs: &HashMap<String, TargetSpec>,
+    group_bindings: &mut Vec<(String, String)>,
+) {
+    let mut current = Some(group_key.to_string());
+    let mut seen = std::collections::HashSet::new();
+    while let Some(key) = current {
+        if !seen.insert(key.clone()) {
+            break;
+        }
+        let Some(spec) = target_specs.get(&key) else {
+            break;
+        };
+        if !group_bindings.iter().any(|(existing, _)| existing == &key) {
+            group_bindings.push((key.clone(), spec.folder_id.clone()));
+        }
+        current = spec.parent_group_key.clone();
+    }
 }
 
 fn prepare_one(
@@ -697,6 +796,7 @@ fn prepare_one(
     ordinal: usize,
     entry: &ScannedEntry,
     group_key: Option<String>,
+    direct_folder_id: Option<String>,
     kind: PayloadKind,
     reservation: Reservation,
 ) -> PrepareOutcome {
@@ -710,6 +810,7 @@ fn prepare_one(
             ordinal,
             entry,
             group_key,
+            direct_folder_id.clone(),
             kind,
             reservation.clone(),
             &cancelled,
@@ -721,6 +822,7 @@ fn prepare_one(
             ordinal,
             entry,
             group_key,
+            direct_folder_id.clone(),
             reservation.clone(),
             &cancelled,
         ),
@@ -750,14 +852,17 @@ fn prepare_path_payload(
     ordinal: usize,
     entry: &ScannedEntry,
     group_key: Option<String>,
+    direct_folder_id: Option<String>,
     kind: PayloadKind,
     reservation: Reservation,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<PreparedSuccess, (bool, String)> {
     match kind {
-        PayloadKind::Linked => prepare_linked(entry, ordinal, group_key, reservation),
+        PayloadKind::Linked => {
+            prepare_linked(entry, ordinal, group_key, direct_folder_id, reservation)
+        }
         PayloadKind::Managed => {
-            prepare_managed_path(root, ordinal, entry, group_key, reservation, cancelled)
+            prepare_managed_path(root, ordinal, entry, group_key, direct_folder_id, reservation, cancelled)
         }
     }
 }
@@ -766,6 +871,7 @@ fn prepare_linked(
     entry: &ScannedEntry,
     ordinal: usize,
     group_key: Option<String>,
+    direct_folder_id: Option<String>,
     reservation: Reservation,
 ) -> Result<PreparedSuccess, (bool, String)> {
     let source_path = match &entry.source {
@@ -797,6 +903,7 @@ fn prepare_linked(
         ordinal,
         input_id: entry.epub.input_id.clone(),
         group_key,
+        direct_folder_id,
         content_hash,
         file_name: entry.epub.file_name.clone(),
         metadata,
@@ -824,6 +931,7 @@ fn prepare_managed(
     ordinal: usize,
     entry: &ScannedEntry,
     group_key: Option<String>,
+    direct_folder_id: Option<String>,
     reservation: Reservation,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<PreparedSuccess, (bool, String)> {
@@ -835,6 +943,7 @@ fn prepare_managed(
         ordinal,
         entry,
         group_key,
+        direct_folder_id,
         reservation,
         cancelled,
     )
@@ -845,6 +954,7 @@ fn prepare_managed_path(
     ordinal: usize,
     entry: &ScannedEntry,
     group_key: Option<String>,
+    direct_folder_id: Option<String>,
     reservation: Reservation,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<PreparedSuccess, (bool, String)> {
@@ -863,6 +973,7 @@ fn prepare_managed_path(
         ordinal,
         entry,
         group_key,
+        direct_folder_id,
         reservation,
         cancelled,
     )?;
@@ -878,6 +989,7 @@ fn prepare_managed_reader(
     ordinal: usize,
     entry: &ScannedEntry,
     group_key: Option<String>,
+    direct_folder_id: Option<String>,
     reservation: Reservation,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<PreparedSuccess, (bool, String)> {
@@ -906,6 +1018,7 @@ fn prepare_managed_reader(
         ordinal,
         input_id: entry.epub.input_id.clone(),
         group_key,
+        direct_folder_id,
         content_hash,
         file_name: entry.epub.file_name.clone(),
         metadata,
@@ -931,6 +1044,7 @@ fn prepare_managed(
     _ordinal: usize,
     _entry: &ScannedEntry,
     _group_key: Option<String>,
+    _direct_folder_id: Option<String>,
     _reservation: Reservation,
     _cancelled: &dyn Fn() -> bool,
 ) -> Result<PreparedSuccess, (bool, String)> {
@@ -954,6 +1068,7 @@ pub fn run_import(
     job: Arc<super::job::DirectoryImportJob>,
     options: ImportOptions,
     targets: Vec<FolderTarget>,
+    anchor: Option<ImportAnchor>,
     on_progress: Channel<DirectoryProgress>,
     copy: bool,
 ) -> Result<super::types::DirectoryImportResult, String> {
@@ -961,7 +1076,7 @@ pub fn run_import(
     let root = job.root().ok_or_else(|| "目录扫描尚未完成".to_string())?;
     let entries = job.entries();
     let public_entries: Vec<ScannedEpub> = entries.iter().map(|entry| entry.epub.clone()).collect();
-    let plan = plan_directory_import(&root, &public_entries, &options);
+    let plan = plan_directory_import(&root, &public_entries, &options, anchor.as_ref());
     let target_specs = target_specs(&plan, &targets)?;
     let root_path = library_root(app)?;
     if copy
@@ -1023,6 +1138,7 @@ pub fn run_import(
                 task.ordinal,
                 &task.entry,
                 task.group_key,
+                task.direct_folder_id,
                 task.kind,
                 task.reservation,
             )
@@ -1239,6 +1355,83 @@ mod tests {
     }
 
     #[test]
+    fn target_specs_link_each_group_to_its_parent_target_and_anchor() {
+        use super::super::planner::ImportPlan;
+        let root = "00000000-0000-4000-8000-0000000000a0".to_string();
+        let child = "00000000-0000-4000-8000-0000000000a1".to_string();
+        let plan = ImportPlan {
+            groups: vec![
+                super::super::planner::PlannedGroup {
+                    group_key: "root".into(),
+                    source_segments: vec![],
+                    parent_group_key: None,
+                    depth: 1,
+                    suggested_name: "根".into(),
+                },
+                super::super::planner::PlannedGroup {
+                    group_key: "child".into(),
+                    source_segments: vec!["A".into()],
+                    parent_group_key: Some("root".into()),
+                    depth: 2,
+                    suggested_name: "A".into(),
+                },
+            ],
+            inputs: vec![],
+            flattened: false,
+            anchor_folder_id: Some("current".into()),
+            anchor_depth: 0,
+        };
+        let targets = [
+            FolderTarget::Create {
+                group_key: "root".into(),
+                folder_id: root.clone(),
+                name: "根".into(),
+                parent_folder_id: None,
+            },
+            FolderTarget::Create {
+                group_key: "child".into(),
+                folder_id: child.clone(),
+                name: "A".into(),
+                parent_folder_id: Some(root.clone()),
+            },
+        ];
+        let specs = target_specs(&plan, &targets).unwrap();
+        assert_eq!(specs["root"].parent_folder_id.as_deref(), Some("current"));
+        assert_eq!(specs["child"].parent_folder_id.as_deref(), Some(root.as_str()));
+    }
+
+    #[test]
+    fn create_chain_and_bindings_follow_each_group_parent() {
+        let root = "00000000-0000-4000-8000-0000000000b0".to_string();
+        let child = "00000000-0000-4000-8000-0000000000b1".to_string();
+        let specs = HashMap::from([
+            ("root".to_string(), TargetSpec {
+                folder_id: root.clone(),
+                create_name: Some("根".into()),
+                parent_folder_id: Some("current".into()),
+                parent_group_key: None,
+            }),
+            ("child".to_string(), TargetSpec {
+                folder_id: child.clone(),
+                create_name: Some("子".into()),
+                parent_folder_id: Some(root.clone()),
+                parent_group_key: Some("root".into()),
+            }),
+        ]);
+        let folder_specs: HashMap<String, TargetSpec> = specs.values()
+            .map(|spec| (spec.folder_id.clone(), spec.clone()))
+            .collect();
+        let mut creates = HashMap::new();
+        collect_creates(&child, &folder_specs, &mut creates, &mut std::collections::HashSet::new());
+        assert_eq!(creates.len(), 2);
+        assert_eq!(creates[&child].parent_id.as_deref(), Some(root.as_str()));
+        assert_eq!(creates[&root].parent_id.as_deref(), Some("current"));
+        let mut bindings = Vec::new();
+        collect_group_chain("child", &specs, &mut bindings);
+        assert_eq!(bindings, vec![("child".to_string(), child), ("root".to_string(), root)]);
+    }
+
+    #[test]
     fn c2_path_copy_streams_verified_bytes_and_publishes_a_readable_name() {
         let root = temp_file("c2-copy");
         std::fs::create_dir_all(&root).unwrap();
@@ -1268,6 +1461,7 @@ mod tests {
             &root,
             0,
             &entry,
+            None,
             None,
             select_payload_kind(&entry.source, true),
             reservation,
@@ -1305,7 +1499,7 @@ mod tests {
             .reserve_payload(PayloadKind::Managed, entry.epub.size_hint)
             .unwrap();
         assert!(
-            prepare_managed_path(&root, 0, &entry, None, reservation.clone(), &|| true).is_err()
+            prepare_managed_path(&root, 0, &entry, None, None, reservation.clone(), &|| true).is_err()
         );
         budget.release(reservation);
         let EntrySource::Path(ref source) = entry.source else {
@@ -1316,7 +1510,7 @@ mod tests {
             .reserve_payload(PayloadKind::Managed, entry.epub.size_hint)
             .unwrap();
         assert!(
-            prepare_managed_path(&root, 0, &entry, None, reservation.clone(), &|| false).is_err()
+            prepare_managed_path(&root, 0, &entry, None, None, reservation.clone(), &|| false).is_err()
         );
         budget.release(reservation);
         assert_eq!(std::fs::read(source).unwrap(), b"invalid zip");

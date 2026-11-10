@@ -1,5 +1,5 @@
 /** Frozen FI native/Web facade; jobs, roots and bindings are LOCAL ONLY. */
-import type { DirectoryBinding, ImportOptions, ImportRoot, ScannedEpub } from "./planner";
+import type { DirectoryBinding, ImportAnchor, ImportOptions, ImportRoot, ScannedEpub } from "./planner";
 
 export interface ScanResult {
   readonly jobId: string;
@@ -16,7 +16,9 @@ export interface InputPage {
 }
 export type FolderTarget =
   | { readonly groupKey: string; readonly kind: "reuse"; readonly folderId: string }
-  | { readonly groupKey: string; readonly kind: "create"; readonly folderId: string; readonly name: string };
+  | { readonly groupKey: string; readonly kind: "create"; readonly folderId: string; readonly name: string;
+      /** Parent for a new folder; omitted = current anchor/root compatibility. */
+      readonly parentFolderId?: string | null };
 export interface ImportCounts {
   readonly completed: number;
   readonly imported: number;
@@ -48,12 +50,14 @@ export interface IssuePage {
   readonly nextCursor: string | null;
 }
 export interface DirectoryImportPort {
-  scan(onProgress: (event: DirectoryProgress) => void): Promise<ScanResult | null>;
+  /** Anchor is the current shelf folder; omitted means root for existing callers. */
+  scan(onProgress: (event: DirectoryProgress) => void, anchor?: ImportAnchor): Promise<ScanResult | null>;
   page(jobId: string, cursor?: string): Promise<InputPage>;
   start(input: {
     readonly jobId: string;
     readonly options: ImportOptions;
     readonly targets: readonly FolderTarget[];
+    readonly anchor?: ImportAnchor;
     /** Windows paths: copy into the book library (frozen at start). Absent = link, as before. */
     readonly copyToLibrary?: boolean;
     readonly onProgress: (event: DirectoryProgress) => void;

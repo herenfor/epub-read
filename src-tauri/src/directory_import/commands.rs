@@ -5,7 +5,7 @@ use super::job::{cancel_reply, scan_job, DirectoryImportJob, DirectoryImportStat
 use super::runner;
 use super::types::{
     DirectoryCancelReply, DirectoryImportResult, DirectoryPickResult, DirectoryProgress,
-    DirectorySource, FolderTarget, ImportOptions, InputPage, IssuePage, ScanResult,
+    DirectorySource, FolderTarget, ImportAnchor, ImportOptions, InputPage, IssuePage, ScanResult,
 };
 use std::sync::Arc;
 use tauri::ipc::Channel;
@@ -53,6 +53,7 @@ pub async fn directory_import_scan(
     state: State<'_, DirectoryImportState>,
     job_id: String,
     source: DirectorySource,
+    anchor: Option<ImportAnchor>,
     on_progress: Channel<DirectoryProgress>,
 ) -> Result<ScanResult, String> {
     let job = state.register(&job_id, source)?;
@@ -63,7 +64,7 @@ pub async fn directory_import_scan(
     let worker_job = Arc::clone(&job);
     let result = tauri::async_runtime::spawn_blocking(move || {
         let _worker = worker;
-        scan_job(&app, &worker_job, &on_progress)
+        scan_job(&app, &worker_job, anchor, &on_progress)
     })
     .await;
     match result {
@@ -122,6 +123,7 @@ pub async fn directory_import_start(
     job_id: String,
     options: ImportOptions,
     targets: Vec<FolderTarget>,
+    anchor: Option<ImportAnchor>,
     on_progress: Channel<DirectoryProgress>,
     copy_to_library: Option<bool>,
 ) -> Result<DirectoryImportResult, String> {
@@ -131,6 +133,13 @@ pub async fn directory_import_start(
     if job.scan_result().is_none() {
         return Err("目录扫描尚未完成，无法开始导入".to_string());
     }
+    let scanned_anchor = job.anchor();
+    if let (Some(scanned), Some(provided)) = (&scanned_anchor, &anchor) {
+        if scanned != provided {
+            return Err("当前书架位置在预览后发生变化，请重新扫描".to_string());
+        }
+    }
+    let anchor = anchor.or(scanned_anchor);
     let worker = job
         .begin_import()
         .ok_or_else(|| "该目录导入作业当前不可启动或只能启动一次".to_string())?;
@@ -138,7 +147,7 @@ pub async fn directory_import_start(
     let result = tauri::async_runtime::spawn_blocking(move || {
         let _worker = worker;
         let copy = cfg!(target_os = "android") || copy_to_library.unwrap_or(false);
-        runner::run_import(&app, worker_job, options, targets, on_progress, copy)
+        runner::run_import(&app, worker_job, options, targets, anchor, on_progress, copy)
     })
     .await;
     match result {

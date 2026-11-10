@@ -9,6 +9,16 @@ use serde::{Deserialize, Serialize};
 pub const PAGE_MAX_ITEMS: usize = 128;
 pub const PAGE_MAX_JSON_BYTES: usize = 256 * 1024;
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportAnchor {
+    #[serde(default)]
+    pub folder_id: Option<String>,
+    /// Current folder depth; 0 = root, 1..=5 = existing folder depth.
+    #[serde(default)]
+    pub depth: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportRoot {
@@ -66,6 +76,8 @@ pub enum FolderTarget {
         group_key: String,
         folder_id: String,
         name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent_folder_id: Option<String>,
     },
 }
 
@@ -269,12 +281,13 @@ mod tests {
 
     #[test]
     fn folder_targets_use_frontend_camel_case_fields() {
-        for wire in [
-            serde_json::json!({"kind":"reuse", "groupKey":"group", "folderId":"folder"}),
-            serde_json::json!({"kind":"create", "groupKey":"group", "folderId":"folder", "name":"分类"}),
+        for (wire, group) in [
+            (serde_json::json!({"kind":"reuse", "groupKey":"group", "folderId":"folder"}), "group"),
+            (serde_json::json!({"kind":"create", "groupKey":"group", "folderId":"folder", "name":"分类"}), "group"),
+            (serde_json::json!({"kind":"create", "groupKey":"child", "folderId":"folder", "name":"子", "parentFolderId":"parent"}), "child"),
         ] {
             let target: FolderTarget = serde_json::from_value(wire.clone()).unwrap();
-            assert_eq!(target.group_key(), "group");
+            assert_eq!(target.group_key(), group);
             assert_eq!(target.folder_id(), "folder");
             assert_eq!(serde_json::to_value(target).unwrap(), wire);
         }

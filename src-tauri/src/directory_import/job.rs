@@ -21,6 +21,7 @@ pub struct DirectoryImportJob {
     source: DirectorySource,
     gate: Arc<super::policy::DirectoryJobGate>,
     root: Mutex<Option<super::types::ImportRoot>>,
+    anchor: Mutex<Option<super::types::ImportAnchor>>,
     entries: Mutex<Vec<ScannedEntry>>,
     scan_result: Mutex<Option<ScanResult>>,
     issues: Mutex<Vec<ImportIssue>>,
@@ -65,6 +66,7 @@ impl DirectoryImportJob {
             source,
             gate: Arc::new(super::policy::DirectoryJobGate::default()),
             root: Mutex::new(None),
+            anchor: Mutex::new(None),
             entries: Mutex::new(Vec::new()),
             scan_result: Mutex::new(None),
             issues: Mutex::new(Vec::new()),
@@ -94,7 +96,7 @@ impl DirectoryImportJob {
         }
     }
 
-    pub fn set_scan(&self, output: ScanOutput) -> ScanResult {
+    pub fn set_scan(&self, output: ScanOutput, anchor: Option<super::types::ImportAnchor>) -> ScanResult {
         let result = ScanResult {
             job_id: self.id.clone(),
             root: output.root.clone(),
@@ -103,6 +105,7 @@ impl DirectoryImportJob {
             unreadable_directory_count: output.unreadable_directory_count,
         };
         *self.root.lock().unwrap() = Some(output.root);
+        *self.anchor.lock().unwrap() = anchor;
         *self.entries.lock().unwrap() = output.entries;
         *self.scan_result.lock().unwrap() = Some(result.clone());
         result
@@ -114,6 +117,10 @@ impl DirectoryImportJob {
 
     pub fn root(&self) -> Option<super::types::ImportRoot> {
         self.root.lock().unwrap().clone()
+    }
+
+    pub fn anchor(&self) -> Option<super::types::ImportAnchor> {
+        self.anchor.lock().unwrap().clone()
     }
 
     pub fn entries(&self) -> Vec<ScannedEntry> {
@@ -180,6 +187,7 @@ impl DirectoryImportJob {
         }
 
         let bindings_map = directory_bindings(app)?;
+        let anchor = self.anchor();
         let mut count = (entries.len() - start).min(PAGE_MAX_ITEMS);
         loop {
             let end = start + count;
@@ -187,7 +195,7 @@ impl DirectoryImportJob {
                 .iter()
                 .map(|entry| entry.epub.clone())
                 .collect();
-            let bindings = page_bindings(&root, &items, &bindings_map, start == 0);
+            let bindings = page_bindings(&root, &items, &bindings_map, start == 0, anchor.as_ref());
             let next_cursor = (end < entries.len()).then(|| end.to_string());
             let mut page = InputPage {
                 items,
@@ -242,15 +250,30 @@ fn page_bindings(
     items: &[ScannedEpub],
     known: &BTreeMap<String, String>,
     include_root: bool,
+    anchor: Option<&super::types::ImportAnchor>,
 ) -> Vec<DirectoryBinding> {
+    let anchor_folder_id = anchor.and_then(|anchor| anchor.folder_id.as_deref());
+    let anchor_depth = if anchor_folder_id.is_none() {
+        0
+    } else {
+        anchor.map(|anchor| anchor.depth.min(5)).unwrap_or(0)
+    };
+    let max_prefix = (5_u32.saturating_sub(anchor_depth).saturating_sub(1)) as usize;
     let mut keys: Vec<String> = Vec::new();
     if include_root {
-        keys.push(directory_group_key(root, &[]));
+        keys.push(directory_group_key(root, &[], anchor_folder_id));
     }
     for item in items {
-        let key = directory_group_key(root, &item.relative_parent_segments);
-        if !keys.contains(&key) {
-            keys.push(key);
+        let limit = item.relative_parent_segments.len().min(max_prefix);
+        for length in 0..=limit {
+            let key = directory_group_key(
+                root,
+                &item.relative_parent_segments[..length],
+                anchor_folder_id,
+            );
+            if !keys.contains(&key) {
+                keys.push(key);
+            }
         }
     }
     keys.into_iter()
@@ -385,6 +408,7 @@ impl AndroidTreeBridge for AppAndroidTreeBridge<'_> {
 pub fn scan_job(
     app: &AppHandle,
     job: &DirectoryImportJob,
+    anchor: Option<super::types::ImportAnchor>,
     on_progress: &tauri::ipc::Channel<super::types::DirectoryProgress>,
 ) -> Result<ScanResult, String> {
     let progress = |scanned: usize| {
@@ -402,7 +426,7 @@ pub fn scan_job(
     if output.cancelled {
         return Err("目录扫描已取消".to_string());
     }
-    let result = job.set_scan(output);
+    let result = job.set_scan(output, anchor);
     progress(result.input_count);
     Ok(result)
 }
@@ -465,12 +489,12 @@ mod tests {
             },
         ];
         let mut known = BTreeMap::new();
-        known.insert(directory_group_key(&root, &[]), "root-folder".to_string());
+        known.insert(directory_group_key(&root, &[], None), "root-folder".to_string());
         known.insert(
-            directory_group_key(&root, &["小说".to_string()]),
+            directory_group_key(&root, &["小说".to_string()], None),
             "novel-folder".to_string(),
         );
-        let bindings = page_bindings(&root, &items, &known, true);
+        let bindings = page_bindings(&root, &items, &known, true, None);
         assert_eq!(bindings.len(), 2);
         assert!(bindings
             .iter()
@@ -478,6 +502,31 @@ mod tests {
         assert!(bindings
             .iter()
             .any(|binding| binding.folder_id == "novel-folder"));
+    }
+
+    #[test]
+    fn page_bindings_include_anchor_keys_and_ancestor_prefixes() {
+        let root = ImportRoot { source_root_key: "root".into(), name: "全部".into() };
+        let item = ScannedEpub {
+            input_id: "a".into(),
+            relative_parent_segments: vec!["A".into(), "B".into(), "C".into()],
+            file_name: "a.epub".into(),
+            size_hint: None,
+        };
+        let anchor = crate::directory_import::types::ImportAnchor {
+            folder_id: Some("current".into()),
+            depth: 2,
+        };
+        let mut known = BTreeMap::new();
+        for segments in [vec![], vec!["A".to_string()], vec!["A".to_string(), "B".to_string()]] {
+            known.insert(
+                directory_group_key(&root, &segments, Some("current")),
+                segments.join("/"),
+            );
+        }
+        let bindings = page_bindings(&root, &[item], &known, true, Some(&anchor));
+        assert_eq!(bindings.len(), 3);
+        assert_eq!(bindings[0].folder_id, "");
     }
 
     #[test]

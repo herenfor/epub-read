@@ -47,17 +47,18 @@ describe("folder import planner (migrated core)", () => {
       { inputId: "loose", relativeParentSegments: [], fileName: "0.epub" },
       { inputId: "deep", relativeParentSegments: ["分类", "系列"], fileName: "z.epub" },
     ], auto);
-    expect(mixed.flattened).toBe(true);
+    expect(mixed.flattened).toBe(false);
     // Categorized candidates precede loose-root duplicates.
     expect(mixed.inputs.map((i) => [i.inputId, i.groupKey === null])).toEqual([["deep", false], ["loose", true]]);
-    expect(mixed.groups.map((g) => g.suggestedName)).toEqual(["分类 · 系列"]);
+    expect(mixed.groups.map((g) => [g.suggestedName, g.depth, g.parentGroupKey === null]))
+      .toEqual([["全部书籍", 1, true], ["分类", 2, false], ["系列", 3, false]]);
     expect(directoryGroupKey(root, ["a · b"])).not.toBe(directoryGroupKey(root, ["a", "b"]));
   });
 
   it("reserves bound folders first, reuses renamed bindings and suffixes collisions", () => {
     const named = [
-      { groupKey: "a", sourceSegments: ["a"], suggestedName: "系列" },
-      { groupKey: "b", sourceSegments: ["b"], suggestedName: "系列" },
+      { groupKey: "a", sourceSegments: ["a"], parentGroupKey: null, depth: 1, suggestedName: "系列" },
+      { groupKey: "b", sourceSegments: ["b"], parentGroupKey: null, depth: 1, suggestedName: "系列" },
     ];
     const resolved = resolveGroups(named, [{ folderId: "existing", name: "系列" }], [{ groupKey: "b", folderId: "existing" }]);
     expect(resolved.map((r) => r.kind)).toEqual(["create", "reuse"]);
@@ -83,8 +84,8 @@ describe("folder import planner (migrated core)", () => {
 
   it("builds start targets that cover every group and never pass an unresolved choice", () => {
     const groups = [
-      { groupKey: "a", sourceSegments: ["a"], suggestedName: "A" },
-      { groupKey: "b", sourceSegments: ["b"], suggestedName: "B" },
+      { groupKey: "a", sourceSegments: ["a"], parentGroupKey: null, depth: 1, suggestedName: "A" },
+      { groupKey: "b", sourceSegments: ["b"], parentGroupKey: null, depth: 1, suggestedName: "B" },
     ];
     const resolutions = [
       { groupKey: "a", kind: "create" as const, name: "A (2)" },
@@ -207,14 +208,14 @@ async function importAll(port: ReturnType<typeof createWebDirectoryImportPort>, 
 }
 
 describe("Web directory import port", () => {
-  it("scans webkitRelativePath segments, keeps only EPUB candidates and claims no binding", () => {
+  it("scans webkitRelativePath segments, keeps supported book candidates and claims no binding", () => {
     const scanned = scanWebDirectoryFiles([
       fakeFile("根/a.epub", new Uint8Array()),
       fakeFile("根/x/y/b.EPUB", new Uint8Array()),
       fakeFile("根/x/note.txt", new Uint8Array()),
     ], "web:key");
     expect(scanned.root).toEqual({ sourceRootKey: "web:key", name: "根" });
-    expect(scanned.items.map((i) => i.relativeParentSegments)).toEqual([[], ["x", "y"]]);
+    expect(scanned.items.map((i) => i.relativeParentSegments)).toEqual([[], ["x", "y"], ["x"]]);
   });
 
   it("imports in planner order, keeps classified books, creates folders only when used", async () => {
@@ -222,14 +223,14 @@ describe("Web directory import port", () => {
     const { result, page } = await importAll(port, memory.state);
     expect(page.bindings).toEqual([]);
     expect(result.status).toBe("completed");
-    expect(result.counts).toMatchObject({ completed: 5, imported: 2, duplicates: 3, failed: 0, placementSkipped: 0, createdFolders: 2 });
+    expect(result.counts).toMatchObject({ completed: 5, imported: 2, duplicates: 3, failed: 0, placementSkipped: 0, createdFolders: 3 });
     const state = memory.state();
     const nameOf = (hash: string) => {
       const id = effectiveFolderId(state, hash);
       return id ? state.folders[id].name.value : null;
     };
     expect(nameOf(hashes.hashA)).toBe("小说"); // category copy wins over the loose-root duplicate
-    expect(nameOf(hashes.hashB)).toBe("小说 · 科幻");
+    expect(nameOf(hashes.hashB)).toBe("科幻");
     expect(nameOf(hashes.hashC)).toBe("旧夹"); // already classified: kept
     expect(nameOf(hashes.hashD)).toBe("历史"); // unclassified existing book: reuses the unique same-name folder
     // Existing canonical rows are never re-saved (no fabricated 0% progress).

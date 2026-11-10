@@ -297,7 +297,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn path_scan_skips_non_epub_and_preserves_parent_segments() {
+    fn path_scan_keeps_supported_books_and_preserves_parent_segments() {
         let root = std::env::temp_dir().join(format!(
             "fi-native-scan-{}-{}",
             std::process::id(),
@@ -314,13 +314,14 @@ mod tests {
 
         let output = scan_path_root(&root, "全部书籍".to_string()).unwrap();
         assert_eq!(output.root.name, "全部书籍");
-        assert_eq!(output.entries.len(), 3);
+        assert_eq!(output.entries.len(), 4);
         let names: Vec<&str> = output
             .entries
             .iter()
             .map(|entry| entry.epub.file_name.as_str())
             .collect();
         assert!(names.contains(&"a.epub"));
+        assert!(names.contains(&"b.txt"));
         assert!(names.contains(&"c.EPUB"));
         assert!(names.contains(&"d.epub"));
         let deep = output

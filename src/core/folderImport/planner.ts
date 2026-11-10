@@ -1,9 +1,17 @@
 /** Pure folder-import planning core (FI): grouping, naming, binding reuse, conditional placement. */
+import { MAX_FOLDER_DEPTH } from "../../ui/libraryOrganization";
+
 export type PlacementPolicy = "fillUnclassified" | "preserveAll" | "replace";
 export interface ImportOptions {
   readonly grouping: "auto" | "singleFolder" | "none";
   readonly looseRootBooks: "root" | "namedFolder";
   readonly existingPlacement: PlacementPolicy;
+}
+export interface ImportAnchor {
+  /** Current shelf folder; null means the root shelf. */
+  readonly folderId: string | null;
+  /** Current folder depth, 0 = root shelf, 1..5 = existing folder depth. */
+  readonly depth: number;
 }
 export interface ScannedEpub {
   readonly inputId: string;
@@ -18,18 +26,27 @@ export interface ImportRoot {
 }
 export interface PlannedGroup {
   readonly groupKey: string;
+  /** Source path prefix represented by this folder (never the display path). */
   readonly sourceSegments: readonly string[];
+  readonly parentGroupKey: string | null;
+  /** Absolute shelf depth, 1..MAX_FOLDER_DEPTH. */
+  readonly depth: number;
   readonly suggestedName: string;
 }
 export interface PlannedInput {
   readonly inputId: string;
   readonly ordinal: number;
   readonly groupKey: string | null;
+  /** Set only when the current folder is the deepest allowed target (no new level). */
+  readonly directFolderId?: string;
 }
 export interface ImportPlan {
   readonly groups: readonly PlannedGroup[];
   readonly inputs: readonly PlannedInput[];
+  /** True when at least one source path was merged into the fifth-level target. */
   readonly flattened: boolean;
+  readonly anchorFolderId: string | null;
+  readonly anchorDepth: number;
 }
 
 /** Matches Rust str.chars() order; no platform locale or UTF-16 ordering. */
@@ -48,47 +65,92 @@ function compareSegments(a: readonly string[], b: readonly string[]): number {
   }
   return Math.sign(a.length - b.length);
 }
-export function directoryGroupKey(root: ImportRoot, segments: readonly string[]): string {
-  // JSON array prevents separator/name collisions; never decode display names.
-  return JSON.stringify([root.sourceRootKey, segments]);
+/**
+ * Local directory binding key. A non-root anchor adds the current folder to
+ * the key so the same source tree under different shelf parents cannot reuse
+ * or overwrite one another's mapping. The legacy two-element key stays for
+ * root imports, preserving existing root bindings.
+ */
+export function directoryGroupKey(
+  root: ImportRoot,
+  segments: readonly string[],
+  anchorFolderId: string | null = null,
+): string {
+  const tuple: unknown[] = [root.sourceRootKey, segments];
+  if (anchorFolderId !== null) tuple.push(anchorFolderId);
+  return JSON.stringify(tuple);
 }
+/** A tree folder uses the leaf name only; package 3 shows the path separately. */
 export function proposedFolderName(root: ImportRoot, segments: readonly string[]): string {
-  const names = segments.length ? segments : [root.name];
-  const leaf = names[names.length - 1].trim() || "导入书籍";
-  let result = Array.from(leaf).slice(0, 40).join("");
-  for (let i = names.length - 2; i >= 0; i--) {
-    const candidate = `${names[i].trim()} · ${result}`;
-    if (Array.from(candidate).length > 40) break;
-    result = candidate;
-  }
-  return result;
+  const raw = segments.length ? segments[segments.length - 1] : root.name;
+  return Array.from(raw.trim() || "导入书籍").slice(0, 40).join("");
+}
+
+function normalizedAnchor(anchor?: ImportAnchor): ImportAnchor {
+  const folderId = anchor?.folderId ?? null;
+  if (folderId === null) return { folderId: null, depth: 0 };
+  const rawDepth = anchor?.depth ?? 0;
+  const depth = Number.isFinite(rawDepth) ? Math.trunc(rawDepth) : 0;
+  return {
+    folderId,
+    depth: Math.max(0, Math.min(MAX_FOLDER_DEPTH, depth)),
+  };
 }
 
 export function planDirectoryImport(
   root: ImportRoot,
   entries: readonly ScannedEpub[],
   options: ImportOptions,
+  anchorInput?: ImportAnchor,
 ): ImportPlan {
+  const anchor = normalizedAnchor(anchorInput);
+  const maxNewDepth = MAX_FOLDER_DEPTH - anchor.depth;
   const hasChildren = entries.some(e => e.relativeParentSegments.length > 0);
   const groups = new Map<string, PlannedGroup>();
+
+  const ensureGroup = (segments: readonly string[]): string => {
+    const key = directoryGroupKey(root, segments, anchor.folderId);
+    if (groups.has(key)) return key;
+    const parentGroupKey = segments.length === 0 ? null : ensureGroup(segments.slice(0, -1));
+    groups.set(key, {
+      groupKey: key,
+      sourceSegments: [...segments],
+      parentGroupKey,
+      depth: anchor.depth + segments.length + 1,
+      suggestedName: proposedFolderName(root, segments),
+    });
+    return key;
+  };
+
   const mapped = entries.map(entry => {
-    let segments: readonly string[] | null;
-    if (options.grouping === "none") segments = null;
-    else if (options.grouping === "singleFolder") segments = [];
-    else if (entry.relativeParentSegments.length) segments = entry.relativeParentSegments;
-    else segments = !hasChildren || options.looseRootBooks === "namedFolder" ? [] : null;
-    const groupKey = segments === null ? null : directoryGroupKey(root, segments);
-    if (groupKey !== null && !groups.has(groupKey)) {
-      groups.set(groupKey, {
-        groupKey, sourceSegments: [...segments!],
-        suggestedName: proposedFolderName(root, segments!),
-      });
+    if (options.grouping === "none") {
+      return { entry, groupKey: null as string | null, directFolderId: anchor.folderId ?? undefined };
     }
-    return { entry, groupKey };
+    if (maxNewDepth <= 0) {
+      // The current folder itself is the deepest target; no sixth level is made.
+      return { entry, groupKey: null as string | null, directFolderId: anchor.folderId ?? undefined };
+    }
+    if (options.grouping === "singleFolder") {
+      return { entry, groupKey: ensureGroup([]), directFolderId: undefined };
+    }
+    if (entry.relativeParentSegments.length === 0) {
+      // Root-direct books: keep the existing named-folder option. When children
+      // exist, their ancestor chain still creates the selected-root folder.
+      const rootKey = options.looseRootBooks === "namedFolder" || !hasChildren
+        ? ensureGroup([])
+        : null;
+      return { entry, groupKey: rootKey, directFolderId: undefined };
+    }
+    const prefix = entry.relativeParentSegments.slice(0, Math.max(0, maxNewDepth - 1));
+    return { entry, groupKey: ensureGroup(prefix), directFolderId: undefined };
   });
+
+  const flattened = options.grouping === "auto" && entries.some(entry =>
+    entry.relativeParentSegments.length > Math.max(0, maxNewDepth - 1));
+
   mapped.sort((a, b) => {
-    // Categorized candidates must precede loose-root duplicates even across batches.
-    const targetOrder = Number(a.groupKey === null) - Number(b.groupKey === null);
+    const targetOrder = Number(a.groupKey === null && a.directFolderId === undefined)
+      - Number(b.groupKey === null && b.directFolderId === undefined);
     return targetOrder
       || compareSegments(
         [...a.entry.relativeParentSegments, a.entry.fileName],
@@ -97,17 +159,25 @@ export function planDirectoryImport(
       || compareCodePoints(a.entry.inputId, b.entry.inputId);
   });
   return {
-    groups: [...groups.values()].sort((a, b) =>
-      compareSegments(a.sourceSegments, b.sourceSegments)),
-    inputs: mapped.map(({ entry, groupKey }, ordinal) => ({
-      inputId: entry.inputId, ordinal, groupKey,
+    groups: [...groups.values()].sort((a, b) => compareSegments(a.sourceSegments, b.sourceSegments)),
+    inputs: mapped.map(({ entry, groupKey, directFolderId }, ordinal) => ({
+      inputId: entry.inputId,
+      ordinal,
+      groupKey,
+      ...(directFolderId === undefined ? {} : { directFolderId }),
     })),
-    flattened: options.grouping === "auto"
-      && entries.some(e => e.relativeParentSegments.length > 1),
+    flattened,
+    anchorFolderId: anchor.folderId,
+    anchorDepth: anchor.depth,
   };
 }
 
-export interface ActiveFolder { readonly folderId: string; readonly name: string }
+export interface ActiveFolder {
+  readonly folderId: string;
+  readonly name: string;
+  /** Effective parent; omitted means root for backward-compatible flat callers. */
+  readonly parentId?: string | null;
+}
 export interface DirectoryBinding { readonly groupKey: string; readonly folderId: string }
 export type GroupResolution =
   | { readonly groupKey: string; readonly kind: "reuse"; readonly folderId: string }
@@ -122,45 +192,83 @@ function uniqueName(base: string, used: ReadonlySet<string>): string {
     if (!used.has(candidate)) return candidate;
   }
 }
+
+/**
+ * Resolve one planned group to an existing or new folder. Name reuse is
+ * scoped to the same parent; bindings win first. Existing callers that omit
+ * parentId are treated as root siblings until package 3 supplies tree data.
+ */
 export function resolveGroups(
   groups: readonly PlannedGroup[],
   activeFolders: readonly ActiveFolder[],
   bindings: readonly DirectoryBinding[],
+  anchorFolderId: string | null = null,
 ): readonly GroupResolution[] {
   const byId = new Map(activeFolders.map(f => [f.folderId, f]));
   const byGroup = new Map(bindings.map(b => [b.groupKey, b.folderId]));
-  const byName = new Map<string, ActiveFolder[]>();
-  for (const folder of activeFolders) {
-    const list = byName.get(folder.name) ?? [];
+  const byParentName = new Map<string, ActiveFolder[]>();
+  const usedNames = new Map<string, Set<string>>();
+  /** Names already claimed by a source binding or an earlier group in this preview. */
+  const claimedNames = new Map<string, Set<string>>();
+  const rootKey = (parent: string | null | undefined): string => parent ?? "";
+  const namespaceNames = (map: Map<string, Set<string>>, parent: string): Set<string> => {
+    let names = map.get(parent);
+    if (!names) {
+      names = new Set<string>();
+      map.set(parent, names);
+    }
+    return names;
+  };
+  const addActive = (folder: ActiveFolder): void => {
+    const parent = rootKey(folder.parentId);
+    const list = byParentName.get(parent) ?? [];
     list.push(folder);
-    byName.set(folder.name, list);
+    byParentName.set(parent, list);
+    namespaceNames(usedNames, parent).add(folder.name);
+  };
+  for (const folder of activeFolders) addActive(folder);
+  // Reserve folders already bound to another source group. An unbound group
+  // may not silently reuse one of those siblings.
+  for (const binding of bindings) {
+    const folder = byId.get(binding.folderId);
+    if (folder) namespaceNames(claimedNames, rootKey(folder.parentId)).add(folder.name);
   }
-  const usedNames = new Set(activeFolders.map(f => f.name));
-  // Reserve all valid source bindings first, including groups visited later.
-  const claimedNames = new Set(groups.flatMap(group => {
-    const bound = byGroup.get(group.groupKey);
-    const folder = bound ? byId.get(bound) : undefined;
-    return folder ? [folder.name] : [];
-  }));
-  return groups.map(group => {
+  const resolvedById = new Map<string, string>();
+  const result: GroupResolution[] = [];
+  for (const group of [...groups].sort((a, b) => (a.depth ?? 0) - (b.depth ?? 0)
+    || compareSegments(a.sourceSegments, b.sourceSegments))) {
+    const parentNamespace = group.parentGroupKey === null
+      ? rootKey(anchorFolderId)
+      : resolvedById.get(group.parentGroupKey) ?? `pending:${group.parentGroupKey}`;
     const bound = byGroup.get(group.groupKey);
     if (bound && byId.has(bound)) {
-      claimedNames.add(byId.get(bound)!.name);
-      return { groupKey: group.groupKey, kind: "reuse", folderId: bound };
+      resolvedById.set(group.groupKey, bound);
+      result.push({ groupKey: group.groupKey, kind: "reuse", folderId: bound });
+      continue;
     }
-    const matches = byName.get(group.suggestedName) ?? [];
-    if (!claimedNames.has(group.suggestedName) && matches.length) {
-      claimedNames.add(group.suggestedName);
-      if (matches.length === 1) {
-        return { groupKey: group.groupKey, kind: "reuse", folderId: matches[0].folderId };
-      }
-      return { groupKey: group.groupKey, kind: "choose", candidates: matches };
+    const claimed = namespaceNames(claimedNames, parentNamespace);
+    const matches = claimed.has(group.suggestedName)
+      ? []
+      : (byParentName.get(parentNamespace) ?? [])
+        .filter(folder => folder.name === group.suggestedName);
+    if (matches.length === 1) {
+      claimed.add(group.suggestedName);
+      resolvedById.set(group.groupKey, matches[0].folderId);
+      result.push({ groupKey: group.groupKey, kind: "reuse", folderId: matches[0].folderId });
+      continue;
     }
-    const name = uniqueName(group.suggestedName, usedNames);
-    usedNames.add(name);
-    claimedNames.add(group.suggestedName);
-    return { groupKey: group.groupKey, kind: "create", name };
-  });
+    if (matches.length > 1) {
+      claimed.add(group.suggestedName);
+      result.push({ groupKey: group.groupKey, kind: "choose", candidates: matches });
+      continue;
+    }
+    const names = namespaceNames(usedNames, parentNamespace);
+    const name = uniqueName(group.suggestedName, names);
+    names.add(name);
+    claimed.add(group.suggestedName);
+    result.push({ groupKey: group.groupKey, kind: "create", name });
+  }
+  return result;
 }
 
 export interface Stamp { readonly deviceId: string; readonly counter: number }

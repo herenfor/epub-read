@@ -304,7 +304,7 @@ fn scan(app: &AppHandle) -> Result<WatchResult, String> {
     let (mut next, candidates) = select_candidates(&mut output, &state.seen);
     result.unchanged = result.scanned - output.entries.len();
     if !output.entries.is_empty() {
-        job.set_scan(output);
+        job.set_scan(output, None);
         let imported = run_import(
             app,
             job.clone(),
@@ -314,6 +314,7 @@ fn scan(app: &AppHandle) -> Result<WatchResult, String> {
                 existing_placement: ExistingPlacement::PreserveAll,
             },
             Vec::new(),
+            None,
             Channel::new(|_| Ok(())),
             cfg!(target_os = "android"),
         )?;

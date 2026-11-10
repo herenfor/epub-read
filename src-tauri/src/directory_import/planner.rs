@@ -5,14 +5,19 @@
 //! `char`/`chars()`), never by platform directory enumeration order.
 
 use super::types::{
-    ExistingPlacement, GroupingMode, ImportOptions, ImportRoot, ScannedEpub,
+    ExistingPlacement, GroupingMode, ImportAnchor, ImportOptions, ImportRoot, ScannedEpub,
 };
+use crate::library_organization::MAX_FOLDER_DEPTH;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlannedGroup {
     pub group_key: String,
+    /// Source path prefix represented by this folder, never a display path.
     pub source_segments: Vec<String>,
+    pub parent_group_key: Option<String>,
+    /// Absolute shelf depth (1..=5).
+    pub depth: u32,
     pub suggested_name: String,
 }
 
@@ -21,6 +26,8 @@ pub struct PlannedInput {
     pub input_id: String,
     pub ordinal: usize,
     pub group_key: Option<String>,
+    /// Set only when the current folder is the deepest allowed target.
+    pub direct_folder_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,6 +35,8 @@ pub struct ImportPlan {
     pub groups: Vec<PlannedGroup>,
     pub inputs: Vec<PlannedInput>,
     pub flattened: bool,
+    pub anchor_folder_id: Option<String>,
+    pub anchor_depth: u32,
 }
 
 impl ImportPlan {
@@ -47,88 +56,162 @@ fn compare_segments(a: &[String], b: &[String]) -> std::cmp::Ordering {
         .cmp(b.iter().map(String::as_str))
 }
 
-pub fn directory_group_key(root: &ImportRoot, segments: &[String]) -> String {
-    // JSON array prevents separator/name collisions; never decode display names.
-    serde_json::to_string(&(root.source_root_key.as_str(), segments))
-        .expect("serializing an opaque group key cannot fail")
+/// Local binding key. A non-root anchor adds the current folder so the same
+/// source tree under different shelf parents cannot overwrite one mapping.
+/// Root imports keep the legacy two-element key and existing bindings.
+pub fn directory_group_key(
+    root: &ImportRoot,
+    segments: &[String],
+    anchor_folder_id: Option<&str>,
+) -> String {
+    let tuple = match anchor_folder_id {
+        None => serde_json::json!([root.source_root_key, segments]),
+        Some(anchor) => serde_json::json!([root.source_root_key, segments, anchor]),
+    };
+    serde_json::to_string(&tuple).expect("serializing an opaque group key cannot fail")
 }
 
+/// A tree folder uses the leaf name only; package 3 shows the path separately.
 pub fn proposed_folder_name(root: &ImportRoot, segments: &[String]) -> String {
-    let names: Vec<&str> = if segments.is_empty() {
-        vec![root.name.as_str()]
-    } else {
-        segments.iter().map(String::as_str).collect()
-    };
-    let leaf = names
+    let raw = segments
         .last()
-        .map(|name| crate::library_organization::js_trim(name))
-        .filter(|name| !name.is_empty())
-        .unwrap_or("导入书籍");
-    let mut result: String = leaf.chars().take(40).collect();
-    for name in names.iter().rev().skip(1) {
-        let prefix = crate::library_organization::js_trim(name);
-        if prefix.is_empty() {
-            continue;
-        }
-        let candidate = format!("{prefix} · {result}");
-        if candidate.chars().count() > 40 {
-            break;
-        }
-        result = candidate;
+        .map(String::as_str)
+        .unwrap_or(root.name.as_str());
+    let raw = crate::library_organization::js_trim(raw);
+    let raw = if raw.is_empty() { "导入书籍" } else { raw };
+    raw.chars().take(40).collect()
+}
+
+fn normalized_anchor(anchor: Option<&ImportAnchor>) -> (Option<String>, u32) {
+    let folder_id = anchor.and_then(|anchor| anchor.folder_id.clone());
+    let depth = if folder_id.is_none() {
+        0
+    } else {
+        anchor
+            .map(|anchor| anchor.depth.min(MAX_FOLDER_DEPTH as u32))
+            .unwrap_or(0)
+    };
+    (folder_id, depth)
+}
+
+fn ensure_group(
+    root: &ImportRoot,
+    segments: &[String],
+    anchor_folder_id: Option<&str>,
+    anchor_depth: u32,
+    groups: &mut Vec<PlannedGroup>,
+    seen: &mut HashSet<String>,
+) -> String {
+    let key = directory_group_key(root, segments, anchor_folder_id);
+    if seen.contains(&key) {
+        return key;
     }
-    result
+    let parent_group_key = if segments.is_empty() {
+        None
+    } else {
+        Some(ensure_group(
+            root,
+            &segments[..segments.len() - 1],
+            anchor_folder_id,
+            anchor_depth,
+            groups,
+            seen,
+        ))
+    };
+    groups.push(PlannedGroup {
+        group_key: key.clone(),
+        source_segments: segments.to_vec(),
+        parent_group_key,
+        depth: anchor_depth + segments.len() as u32 + 1,
+        suggested_name: proposed_folder_name(root, segments),
+    });
+    seen.insert(key.clone());
+    key
 }
 
 pub fn plan_directory_import(
     root: &ImportRoot,
     entries: &[ScannedEpub],
     options: &ImportOptions,
+    anchor: Option<&ImportAnchor>,
 ) -> ImportPlan {
+    let (anchor_folder_id, anchor_depth) = normalized_anchor(anchor);
+    let max_new_depth = (MAX_FOLDER_DEPTH as u32).saturating_sub(anchor_depth);
     let has_children = entries
         .iter()
         .any(|entry| !entry.relative_parent_segments.is_empty());
-
     let mut groups: Vec<PlannedGroup> = Vec::new();
-    let mut seen_group_keys: HashSet<String> = HashSet::new();
-    let mut mapped: Vec<(Option<String>, &ScannedEpub)> = entries
+    let mut seen: HashSet<String> = HashSet::new();
+    let direct_anchor = if max_new_depth == 0 || options.grouping == GroupingMode::None {
+        anchor_folder_id.clone()
+    } else {
+        None
+    };
+
+    let mut mapped: Vec<(Option<String>, Option<String>, &ScannedEpub)> = entries
         .iter()
         .map(|entry| {
-            let segments: Option<Vec<String>> = match options.grouping {
+            if direct_anchor.is_some() {
+                return (None, direct_anchor.clone(), entry);
+            }
+            let group_key = match options.grouping {
                 GroupingMode::None => None,
-                GroupingMode::SingleFolder => Some(Vec::new()),
+                GroupingMode::SingleFolder => Some(ensure_group(
+                    root,
+                    &[],
+                    anchor_folder_id.as_deref(),
+                    anchor_depth,
+                    &mut groups,
+                    &mut seen,
+                )),
                 GroupingMode::Auto => {
-                    if !entry.relative_parent_segments.is_empty() {
-                        Some(entry.relative_parent_segments.clone())
-                    } else if !has_children
-                        || options.loose_root_books == super::types::LooseRootBooks::NamedFolder
-                    {
-                        Some(Vec::new())
+                    if entry.relative_parent_segments.is_empty() {
+                        if options.loose_root_books == super::types::LooseRootBooks::NamedFolder
+                            || !has_children
+                        {
+                            Some(ensure_group(
+                                root,
+                                &[],
+                                anchor_folder_id.as_deref(),
+                                anchor_depth,
+                                &mut groups,
+                                &mut seen,
+                            ))
+                        } else {
+                            None
+                        }
                     } else {
-                        None
+                        let prefix_len = entry
+                            .relative_parent_segments
+                            .len()
+                            .min(max_new_depth.saturating_sub(1) as usize);
+                        Some(ensure_group(
+                            root,
+                            &entry.relative_parent_segments[..prefix_len],
+                            anchor_folder_id.as_deref(),
+                            anchor_depth,
+                            &mut groups,
+                            &mut seen,
+                        ))
                     }
                 }
             };
-            let group_key = segments.as_ref().map(|segments| {
-                let key = directory_group_key(root, segments);
-                if seen_group_keys.insert(key.clone()) {
-                    groups.push(PlannedGroup {
-                        group_key: key.clone(),
-                        source_segments: segments.clone(),
-                        suggested_name: proposed_folder_name(root, segments),
-                    });
-                }
-                key
-            });
-            (group_key, entry)
+            (group_key, None, entry)
         })
         .collect();
 
-    mapped.sort_by(|(left_key, left_entry), (right_key, right_entry)| {
-        // Categorized candidates must precede loose-root duplicates even across
-        // batches; completion order never participates.
-        let target_order =
-            (left_key.is_none() as u8).cmp(&(right_key.is_none() as u8));
-        target_order
+    let flattened = options.grouping == GroupingMode::Auto
+        && entries.iter().any(|entry| {
+            entry.relative_parent_segments.len()
+                > max_new_depth.saturating_sub(1) as usize
+        });
+
+    mapped.sort_by(|(left_key, left_direct, left_entry), (right_key, right_direct, right_entry)| {
+        // Targeted candidates precede loose-root duplicates even across batches.
+        let left_targeted = left_key.is_some() || left_direct.is_some();
+        let right_targeted = right_key.is_some() || right_direct.is_some();
+        (right_targeted as u8)
+            .cmp(&(left_targeted as u8))
             .then_with(|| {
                 let mut left_path = left_entry.relative_parent_segments.clone();
                 left_path.push(left_entry.file_name.clone());
@@ -144,20 +227,20 @@ pub fn plan_directory_import(
     let inputs = mapped
         .into_iter()
         .enumerate()
-        .map(|(ordinal, (group_key, entry))| PlannedInput {
+        .map(|(ordinal, (group_key, direct_folder_id, entry))| PlannedInput {
             input_id: entry.input_id.clone(),
             ordinal,
             group_key,
+            direct_folder_id,
         })
         .collect();
 
     ImportPlan {
         groups,
         inputs,
-        flattened: options.grouping == GroupingMode::Auto
-            && entries
-                .iter()
-                .any(|entry| entry.relative_parent_segments.len() > 1),
+        flattened,
+        anchor_folder_id,
+        anchor_depth,
     }
 }
 
@@ -337,15 +420,21 @@ mod tests {
                 entry("root", &[], "a.epub"),
             ],
             &options(),
+            None,
         );
         assert_eq!(plan.inputs.len(), 3);
         assert_eq!(plan.inputs[0].input_id, "deep");
         assert_eq!(plan.inputs[1].input_id, "loose");
         assert_eq!(plan.inputs[2].input_id, "root");
         assert_eq!(plan.inputs[0].ordinal, 0);
-        assert!(plan.flattened);
-        assert_eq!(plan.groups.len(), 1);
-        assert_eq!(plan.groups[0].suggested_name, "分类 · 系列");
+        assert!(!plan.flattened);
+        assert_eq!(
+            plan.groups
+                .iter()
+                .map(|group| (group.suggested_name.as_str(), group.depth))
+                .collect::<Vec<_>>(),
+            vec![("全部书籍", 1), ("分类", 2), ("系列", 3)]
+        );
     }
 
     #[test]
@@ -354,6 +443,7 @@ mod tests {
             &root(),
             &[entry("one", &[], "a.epub")],
             &options(),
+            None,
         );
         assert_eq!(plan.groups.len(), 1);
         assert_eq!(plan.groups[0].source_segments, Vec::<String>::new());
@@ -369,6 +459,7 @@ mod tests {
             &root(),
             &[entry("deep", &["分类"], "a.epub")],
             &none,
+            None,
         );
         assert!(plan.groups.is_empty());
         assert_eq!(plan.inputs[0].group_key, None);
@@ -379,6 +470,7 @@ mod tests {
             &root(),
             &[entry("deep", &["分类"], "a.epub")],
             &single,
+            None,
         );
         assert_eq!(plan.groups.len(), 1);
         assert_eq!(plan.groups[0].suggested_name, "全部书籍");
@@ -388,8 +480,8 @@ mod tests {
     #[test]
     fn group_key_distinguishes_segment_separator_and_name() {
         assert_ne!(
-            directory_group_key(&root(), &[ "a · b".to_string() ]),
-            directory_group_key(&root(), &[ "a".to_string(), "b".to_string() ]),
+            directory_group_key(&root(), &[ "a · b".to_string() ], None),
+            directory_group_key(&root(), &[ "a".to_string(), "b".to_string() ], None),
         );
     }
 
@@ -476,5 +568,87 @@ mod tests {
         successful.record_published("hash", 3);
         successful.record_published("hash", 8);
         assert_eq!(successful.winner("hash"), Some(3));
+    }
+}
+
+#[cfg(test)]
+mod tree_tests {
+    use super::*;
+    use super::super::types::{ExistingPlacement, GroupingMode, ImportAnchor, LooseRootBooks};
+
+    fn root() -> ImportRoot {
+        ImportRoot { source_root_key: "local-root".into(), name: "全部书籍".into() }
+    }
+    fn options() -> ImportOptions {
+        ImportOptions {
+            grouping: GroupingMode::Auto,
+            loose_root_books: LooseRootBooks::Root,
+            existing_placement: ExistingPlacement::FillUnclassified,
+        }
+    }
+    fn entry(input_id: &str, segments: &[&str], file_name: &str) -> ScannedEpub {
+        ScannedEpub {
+            input_id: input_id.into(),
+            relative_parent_segments: segments.iter().map(|s| s.to_string()).collect(),
+            file_name: file_name.into(),
+            size_hint: None,
+        }
+    }
+
+    #[test]
+    fn tree_groups_have_parents_and_deep_books_cap_at_five() {
+        let plan = plan_directory_import(
+            &root(),
+            &[
+                entry("deep", &["A", "B", "C", "D", "E", "F"], "deep.epub"),
+                entry("loose", &[], "loose.epub"),
+            ],
+            &options(),
+            None,
+        );
+        assert_eq!(
+            plan.groups.iter().map(|g| (g.suggested_name.as_str(), g.depth)).collect::<Vec<_>>(),
+            vec![("全部书籍", 1), ("A", 2), ("B", 3), ("C", 4), ("D", 5)]
+        );
+        assert!(plan.flattened);
+        assert_eq!(plan.groups[0].parent_group_key, None);
+        for pair in plan.groups.windows(2) {
+            assert_eq!(pair[1].parent_group_key.as_deref(), Some(pair[0].group_key.as_str()));
+        }
+        let deep = plan.inputs.iter().find(|i| i.input_id == "deep").unwrap();
+        assert_eq!(deep.group_key.as_deref(), Some(plan.groups[4].group_key.as_str()));
+        assert!(plan.inputs.iter().find(|i| i.input_id == "loose").unwrap().group_key.is_none());
+    }
+
+    #[test]
+    fn current_folder_depth_uses_direct_target_at_five_and_counts_layers() {
+        let anchored = plan_directory_import(
+            &root(),
+            &[entry("deep", &["A", "B"], "a.epub")],
+            &options(),
+            Some(&ImportAnchor { folder_id: Some("current".into()), depth: 3 }),
+        );
+        assert_eq!(anchored.anchor_folder_id.as_deref(), Some("current"));
+        assert_eq!(anchored.anchor_depth, 3);
+        assert_eq!(anchored.groups.iter().map(|g| (g.suggested_name.as_str(), g.depth)).collect::<Vec<_>>(),
+            vec![("全部书籍", 4), ("A", 5)]);
+        assert_eq!(anchored.inputs[0].group_key.as_deref(), Some(anchored.groups[1].group_key.as_str()));
+
+        let direct = plan_directory_import(
+            &root(),
+            &[entry("one", &["A"], "a.epub")],
+            &options(),
+            Some(&ImportAnchor { folder_id: Some("current".into()), depth: 5 }),
+        );
+        assert!(direct.groups.is_empty());
+        assert_eq!(direct.inputs[0].group_key, None);
+        assert_eq!(direct.inputs[0].direct_folder_id.as_deref(), Some("current"));
+    }
+
+    #[test]
+    fn binding_key_includes_non_root_anchor_but_keeps_legacy_root_key() {
+        let legacy = directory_group_key(&root(), &["A".into()], None);
+        assert_eq!(legacy, serde_json::to_string(&("local-root", vec!["A"])).unwrap());
+        assert_ne!(legacy, directory_group_key(&root(), &["A".into()], Some("current")));
     }
 }

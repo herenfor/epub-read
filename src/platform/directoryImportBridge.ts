@@ -40,7 +40,7 @@ export function createNativeDirectoryImportPort(initialSource?: NativeDirectoryS
   // A folder dropped on the window is scanned first; 重新选择 then opens the picker.
   let pending = initialSource;
   return {
-    async scan(onProgress): Promise<ScanResult | null> {
+    async scan(onProgress, anchor): Promise<ScanResult | null> {
       const preset = pending;
       pending = undefined;
       const source = preset ?? await invoke<NativeDirectorySource | null>("directory_import_pick");
@@ -51,6 +51,7 @@ export function createNativeDirectoryImportPort(initialSource?: NativeDirectoryS
       return invoke<ScanResult>("directory_import_scan", {
         jobId,
         source,
+        ...(anchor === undefined ? {} : { anchor }),
         onProgress: progressChannel(jobId, onProgress),
       });
     },
@@ -62,6 +63,7 @@ export function createNativeDirectoryImportPort(initialSource?: NativeDirectoryS
         jobId: input.jobId,
         options: input.options,
         targets: input.targets,
+        ...(input.anchor === undefined ? {} : { anchor: input.anchor }),
         ...(input.copyToLibrary === undefined ? {} : { copyToLibrary: input.copyToLibrary }),
         onProgress: progressChannel(input.jobId, input.onProgress),
       });

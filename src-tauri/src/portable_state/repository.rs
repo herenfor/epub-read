@@ -100,11 +100,14 @@ pub struct DirectoryPlacementSnapshot {
 pub struct DirectoryFolderCreate {
     pub folder_id: String,
     pub name: String,
+    /// Parent for the new tree node; None creates at the root/anchor.
+    pub parent_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DirectoryBindingWrite {
-    /// planner JSON `[sourceRootKey, segments]`; never a shortened label.
+    /// planner JSON `[sourceRootKey, segments]` or, for a non-root anchor,
+    /// `[sourceRootKey, segments, anchorFolderId]`; never a shortened label.
     pub directory_key: String,
     pub folder_id: String,
 }
@@ -942,6 +945,13 @@ impl PortableStore {
             }
             crate::library_organization::normalize_folder_name(&create.name)
                 .map_err(PortableError::invalid_entity)?;
+            if let Some(parent_id) = &create.parent_id {
+                if !crate::library_organization::valid_canonical_uuid(parent_id) {
+                    return Err(PortableError::invalid_entity(
+                        "invalid-entity：目录导入创建了无效父文件夹 ID",
+                    ));
+                }
+            }
         }
         for placement in placements {
             if !dto::valid_content_hash(&placement.content_hash) {
@@ -1065,32 +1075,92 @@ impl PortableStore {
             counter,
             state,
         };
+        // Only create folders that are a move target or a necessary ancestor
+        // of one.  The chain is resolved from the supplied target specs, so an
+        // ancestor with no direct books is still created before its child.
+        let create_by_id: std::collections::BTreeMap<&str, &DirectoryFolderCreate> = creates
+            .iter()
+            .map(|create| (create.folder_id.as_str(), create))
+            .collect();
+        let mut needed_creates: std::collections::BTreeSet<String> =
+            std::collections::BTreeSet::new();
+        let mut pending_needed: Vec<String> = moves_by_folder
+            .iter()
+            .map(|(folder_id, _)| folder_id.clone())
+            .filter(|folder_id| create_by_id.contains_key(folder_id.as_str()))
+            .collect();
+        while let Some(folder_id) = pending_needed.pop() {
+            if !needed_creates.insert(folder_id.clone()) {
+                continue;
+            }
+            let Some(create) = create_by_id.get(folder_id.as_str()) else {
+                continue;
+            };
+            let Some(parent_id) = &create.parent_id else {
+                continue;
+            };
+            if envelope.state.folders.contains_key(parent_id) {
+                continue;
+            }
+            if create_by_id.contains_key(parent_id.as_str()) {
+                pending_needed.push(parent_id.clone());
+            } else {
+                return Err(PortableError::invalid_entity(
+                    "invalid-entity：目录导入缺少父文件夹",
+                ));
+            }
+        }
+
+        let mut pending_creates: Vec<DirectoryFolderCreate> = creates
+            .iter()
+            .filter(|create| {
+                needed_creates.contains(&create.folder_id)
+                    && !envelope.state.folders.contains_key(&create.folder_id)
+            })
+            .cloned()
+            .collect();
+        let mut created_ids: std::collections::BTreeSet<String> =
+            std::collections::BTreeSet::new();
         let mut created_folders = 0usize;
-        for create in creates {
-            // A concurrent writer may have created or tombstoned the UUID
-            // after the observation.  An existing active folder is reused; a
-            // tombstone is never revived and must not be passed to
-            // `CreateFolder`.
-            if envelope.state.folders.contains_key(&create.folder_id) {
-                continue;
+        while !pending_creates.is_empty() {
+            let mut progress = false;
+            let mut next_pending = Vec::with_capacity(pending_creates.len());
+            for create in pending_creates {
+                let parent_ready = match &create.parent_id {
+                    None => true,
+                    Some(parent_id) => {
+                        envelope
+                            .state
+                            .folders
+                            .get(parent_id)
+                            .is_some_and(|folder| folder.deleted.is_none())
+                            || created_ids.contains(parent_id)
+                    }
+                };
+                if !parent_ready {
+                    next_pending.push(create);
+                    continue;
+                }
+                envelope = apply_command(
+                    &envelope,
+                    &OrganizationCommand::CreateFolder {
+                        folder_id: create.folder_id.clone(),
+                        name: create.name.clone(),
+                        parent_id: create.parent_id.clone(),
+                    },
+                    &known_hashes,
+                )
+                .map_err(PortableError::invalid_data)?;
+                created_ids.insert(create.folder_id);
+                created_folders += 1;
+                progress = true;
             }
-            let needed = moves_by_folder
-                .iter()
-                .any(|(folder_id, _)| folder_id == &create.folder_id);
-            if !needed {
-                continue;
+            if !progress {
+                return Err(PortableError::invalid_entity(
+                    "invalid-entity：目录导入父文件夹顺序无法满足",
+                ));
             }
-            envelope = apply_command(
-                &envelope,
-                &OrganizationCommand::CreateFolder {
-                    folder_id: create.folder_id.clone(),
-                    name: create.name.clone(),
-                    parent_id: None,
-                },
-                &known_hashes,
-            )
-            .map_err(PortableError::invalid_data)?;
-            created_folders += 1;
+            pending_creates = next_pending;
         }
 
         for (folder_id, content_hashes) in moves_by_folder {
@@ -2927,6 +2997,7 @@ mod directory_import_batch_tests {
                 &[DirectoryFolderCreate {
                     folder_id: FOLDER_F.to_string(),
                     name: "科幻".to_string(),
+                    parent_id: None,
                 }],
                 &[request(HASH_A, Some(FOLDER_F), observed, false)],
                 &[DirectoryBindingWrite {
@@ -3002,6 +3073,7 @@ mod directory_import_batch_tests {
                 &[DirectoryFolderCreate {
                     folder_id: FOLDER_F.to_string(),
                     name: "科幻".to_string(),
+                    parent_id: None,
                 }],
                 &[old],
                 &[],
@@ -3016,6 +3088,7 @@ mod directory_import_batch_tests {
                 &[DirectoryFolderCreate {
                     folder_id: FOLDER_G.to_string(),
                     name: "历史".to_string(),
+                    parent_id: None,
                 }],
                 &[request(HASH_A, Some(FOLDER_G), observed.clone(), true)],
                 &[],
@@ -3049,6 +3122,65 @@ mod directory_import_batch_tests {
     }
 
     #[test]
+    fn ancestor_creates_are_topological_even_when_child_is_listed_first() {
+        let mut store = PortableStore::open_in_memory().unwrap();
+        known_book(&store, HASH_A);
+        let observed = observe(&store, HASH_A);
+        let child = DirectoryFolderCreate {
+            folder_id: FOLDER_G.to_string(),
+            name: "子".to_string(),
+            parent_id: Some(FOLDER_F.to_string()),
+        };
+        let root = DirectoryFolderCreate {
+            folder_id: FOLDER_F.to_string(),
+            name: "父".to_string(),
+            parent_id: None,
+        };
+        let outcome = store.apply_directory_import_batch(
+            &[child, root],
+            &[request(HASH_A, Some(FOLDER_G), observed, false)],
+            &[
+                DirectoryBindingWrite {
+                    directory_key: "root-group".into(),
+                    folder_id: FOLDER_F.into(),
+                },
+                DirectoryBindingWrite {
+                    directory_key: "child-group".into(),
+                    folder_id: FOLDER_G.into(),
+                },
+            ],
+            |_request, _current, _alive| DirectoryPlacementDecision::Move,
+        ).unwrap();
+        assert_eq!(outcome.created_folders, 2);
+        let state = load_organization(&store.connection).unwrap();
+        assert_eq!(state.folders[FOLDER_G].parent_id.as_ref().unwrap().value.as_deref(), Some(FOLDER_F));
+        assert_eq!(effective_folder_id(&state, HASH_A), Some(FOLDER_G));
+        let bindings = store.directory_bindings().unwrap();
+        assert_eq!(bindings["root-group"], FOLDER_F);
+        assert_eq!(bindings["child-group"], FOLDER_G);
+    }
+
+    #[test]
+    fn missing_parent_rejects_before_creating_any_folder() {
+        let mut store = PortableStore::open_in_memory().unwrap();
+        known_book(&store, HASH_A);
+        let observed = observe(&store, HASH_A);
+        let error = store.apply_directory_import_batch(
+            &[DirectoryFolderCreate {
+                folder_id: FOLDER_G.to_string(),
+                name: "子".to_string(),
+                parent_id: Some(FOLDER_F.to_string()),
+            }],
+            &[request(HASH_A, Some(FOLDER_G), observed, false)],
+            &[],
+            |_request, _current, _alive| DirectoryPlacementDecision::Move,
+        ).unwrap_err();
+        assert_eq!(error.code, "invalid-entity");
+        let state = load_organization(&store.connection).unwrap();
+        assert!(state.folders.is_empty());
+    }
+
+    #[test]
     fn empty_moves_do_not_create_requested_folder() {
         let mut store = PortableStore::open_in_memory().unwrap();
         known_book(&store, HASH_A);
@@ -3058,6 +3190,7 @@ mod directory_import_batch_tests {
                 &[DirectoryFolderCreate {
                     folder_id: FOLDER_F.to_string(),
                     name: "空目录".to_string(),
+                    parent_id: None,
                 }],
                 &[request(HASH_A, None, observed, false)],
                 &[],
