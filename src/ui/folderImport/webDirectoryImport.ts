@@ -23,6 +23,8 @@ import { findDuplicateEntry, sha256Hex } from "../importBooks";
 import type { ShelfEntry, ShelfStore } from "../shelf";
 import {
   placementSnapshotOf,
+  directoryTargetSnapshotsOf,
+  type DirectoryTargetSnapshot,
   type DirectoryPlacementCommitter,
   type DirectoryPlacementItem,
 } from "./placementBatch";
@@ -124,6 +126,7 @@ interface WebJob {
   readonly items: readonly ScannedEpub[];
   /** Current shelf folder when the source was chosen; fixed for the job. */
   readonly anchor: ImportAnchor | undefined;
+  readonly targetSnapshots: Map<string, DirectoryTargetSnapshot>;
   /** File references stay in this closure, never in React state or storage. */
   files: Map<string, File> | null;
   readonly issues: ImportIssue[];
@@ -185,6 +188,8 @@ export function createWebDirectoryImportPort(options: WebDirectoryImportOptions)
       }
     }
     const placementTargets = [...targets, ...directTargetByFolder.values()];
+    const targetIds = new Set(placementTargets.flatMap((target) => target.kind === "create" && target.parentFolderId
+      ? [target.folderId, target.parentFolderId] : [target.folderId]));
     const counts = {
       completed: 0, imported: 0, duplicates: 0, failed: 0, placementSkipped: 0, createdFolders: 0,
     };
@@ -234,7 +239,9 @@ export function createWebDirectoryImportPort(options: WebDirectoryImportOptions)
           policy: importOptions.existingPlacement,
           items: batch,
           targets: placementTargets,
+          targetSnapshots: [...job.targetSnapshots.values()].filter((snapshot) => targetIds.has(snapshot.folderId)),
         });
+        const committedSnapshots = directoryTargetSnapshotsOf(committed.organization);
         for (const outcome of committed.outcomes) {
           const decision = outcome.decision;
           if (decision.kind !== "skipped") continue;
@@ -244,6 +251,8 @@ export function createWebDirectoryImportPort(options: WebDirectoryImportOptions)
             : uiText("folderImport.issue.categoryChanged"));
         }
         for (const folderId of committed.createdFolderIds) {
+          const snapshot = committedSnapshots.get(folderId);
+          if (snapshot && !job.targetSnapshots.has(folderId)) job.targetSnapshots.set(folderId, snapshot);
           if (createdTargets.has(folderId)) continue;
           createdTargets.add(folderId);
           counts.createdFolders++;
@@ -384,10 +393,12 @@ export function createWebDirectoryImportPort(options: WebDirectoryImportOptions)
       if (!files) return null;
       const jobId = newId();
       const scanned = scanWebDirectoryFiles(files, `web:${newId()}`);
+      const targetSnapshots = directoryTargetSnapshotsOf(await store.getOrganization());
       jobs.set(jobId, {
         root: scanned.root,
         items: scanned.items,
         anchor,
+        targetSnapshots,
         files: scanned.files,
         issues: [],
         running: null,

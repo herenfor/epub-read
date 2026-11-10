@@ -8,6 +8,7 @@ import {
 import {
   applyCommand,
   effectiveFolderId,
+  effectiveFolderAncestors,
   type LibraryOrganization,
   type OrganizationEnvelope,
 } from "../libraryOrganization";
@@ -32,6 +33,19 @@ export interface DirectoryPlacementBatch {
    * keeps a child from being committed under a missing ancestor.
    */
   readonly targets?: readonly FolderTarget[];
+  readonly targetSnapshots?: readonly DirectoryTargetSnapshot[];
+}
+
+export interface DirectoryTargetSnapshot {
+  readonly folderId: string;
+  readonly ancestorIds: readonly string[];
+}
+
+/** Source-selection baseline; capture new targets from an atomic commit's result. */
+export function directoryTargetSnapshotsOf(state: LibraryOrganization): Map<string, DirectoryTargetSnapshot> {
+  return new Map(Object.entries(state.folders).filter(([, folder]) => !folder.deleted).map(([folderId]) => [
+    folderId, { folderId, ancestorIds: effectiveFolderAncestors(state, folderId) },
+  ]));
 }
 
 export interface DirectoryPlacementOutcome {
@@ -80,6 +94,14 @@ export function applyDirectoryPlacementBatch(
   knownContentHashes: ReadonlySet<string>,
 ): { envelope: OrganizationEnvelope; result: DirectoryPlacementBatchResult } {
   const state = envelope.state;
+  for (const expected of batch.targetSnapshots ?? []) {
+    const folder = state.folders[expected.folderId];
+    const ancestors = effectiveFolderAncestors(state, expected.folderId);
+    if (!folder || folder.deleted || ancestors.length !== expected.ancestorIds.length
+      || ancestors.some((id, index) => id !== expected.ancestorIds[index])) {
+      throw new Error("导入目标文件夹位置已变化，请重新预览");
+    }
+  }
   const creates = new Map<string, Extract<FolderTarget, { kind: "create" }>>();
   const moves = new Map<string, string[]>();
   const outcomes = batch.items.map((item): DirectoryPlacementOutcome => {

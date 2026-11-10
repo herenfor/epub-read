@@ -9,7 +9,7 @@ import {
   type ImportOptions,
 } from "../../core/folderImport/planner";
 import type { DirectoryImportPort, DirectoryProgress, FolderTarget } from "../../core/folderImport/contract";
-import { applyDirectoryPlacementBatch, placementSnapshotOf } from "./placementBatch";
+import { applyDirectoryPlacementBatch, placementSnapshotOf, directoryTargetSnapshotsOf } from "./placementBatch";
 import { FolderImportJobOwner } from "./jobOwner";
 import { createNativeDirectoryImportPort } from "../../platform/directoryImportBridge";
 import { buildFolderTargets, DEFAULT_FOLDER_IMPORT_OPTIONS } from "./FolderImportPanel";
@@ -258,6 +258,37 @@ async function importAll(port: ReturnType<typeof createWebDirectoryImportPort>, 
 }
 
 describe("Web directory import port", () => {
+  it("rejects a reused target moved after the source was selected", async () => {
+    const { memory, port, hashes } = await scenario();
+    const scan = (await port.scan(() => undefined))!;
+    const page = await port.page(scan.jobId);
+    const options: ImportOptions = { ...auto, grouping: "singleFolder" };
+    const plan = planDirectoryImport(scan.root, page.items, options);
+    const targets: FolderTarget[] = plan.groups.map((group) => ({ kind: "reuse", groupKey: group.groupKey, folderId: OLD_FOLDER }));
+    memory.userCommand({ type: "moveFolder", folderId: OLD_FOLDER, parentId: OTHER_FOLDER });
+    const result = await port.start({ jobId: scan.jobId, options, targets, onProgress: () => undefined });
+    expect(result.counts.placementSkipped).toBeGreaterThan(0);
+    expect(effectiveFolderId(memory.state(), hashes.hashA)).toBeNull();
+    expect((await port.issues(scan.jobId)).items.map((item) => item.kind)).toContain("placement-changed");
+    await port.dispose(scan.jobId);
+  });
+
+  it("checks the complete ancestor chain at commit without rejecting a rename", () => {
+    const hash = "a".repeat(64);
+    const known = new Set([hash]);
+    let envelope: OrganizationEnvelope = { deviceId: "00000000-0000-4000-8000-000000000001", counter: 0, state: emptyOrganization() };
+    for (const [folderId, name, parentId] of [[OLD_FOLDER, "R", null], [HISTORY_FOLDER, "C", OLD_FOLDER], [OTHER_FOLDER, "X", null]] as const) {
+      envelope = applyCommand(envelope, { type: "createFolder", folderId, name, parentId }, known);
+    }
+    const target: FolderTarget = { kind: "reuse", groupKey: "child", folderId: HISTORY_FOLDER };
+    const batch = { policy: "fillUnclassified" as const, targetSnapshots: [directoryTargetSnapshotsOf(envelope.state).get(HISTORY_FOLDER)!],
+      items: [{ inputId: "book", contentHash: hash, isExisting: false, target, observed: placementSnapshotOf(envelope.state, hash) }] };
+    const renamed = applyCommand(envelope, { type: "renameFolder", folderId: OLD_FOLDER, name: "renamed" }, known);
+    expect(() => applyDirectoryPlacementBatch(renamed, batch, known)).not.toThrow();
+    const moved = applyCommand(envelope, { type: "moveFolder", folderId: OLD_FOLDER, parentId: OTHER_FOLDER }, known);
+    expect(() => applyDirectoryPlacementBatch(moved, batch, known)).toThrow(/位置已变化/);
+  });
+
   it("scans webkitRelativePath segments, keeps supported book candidates and claims no binding", () => {
     const scanned = scanWebDirectoryFiles([
       fakeFile("根/a.epub", new Uint8Array()),
