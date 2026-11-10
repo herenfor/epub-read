@@ -112,6 +112,9 @@ pub struct DirectoryTargetSnapshot {
     pub folder_id: String,
     pub effective_parent_id: Option<String>,
     pub depth: usize,
+    /// Root-first effective ancestry also detects an ancestor moving while
+    /// this folder keeps its immediate parent and depth.
+    pub ancestor_ids: Vec<String>,
 }
 
 fn directory_target_snapshot(
@@ -123,10 +126,18 @@ fn directory_target_snapshot(
     if folder.deleted.is_some() {
         return None;
     }
+    let mut ancestor_ids = Vec::new();
+    let mut parent = projection.parent_by_id.get(folder_id).cloned().flatten();
+    while let Some(id) = parent {
+        parent = projection.parent_by_id.get(&id).cloned().flatten();
+        ancestor_ids.push(id);
+    }
+    ancestor_ids.reverse();
     Some(DirectoryTargetSnapshot {
         folder_id: folder_id.to_string(),
         effective_parent_id: projection.parent_by_id.get(folder_id).cloned().flatten(),
         depth: *projection.depth_by_id.get(folder_id)?,
+        ancestor_ids,
     })
 }
 
@@ -165,6 +176,9 @@ pub struct DirectoryImportBatchOutcome {
     pub placements: Vec<DirectoryPlacementOutcome>,
     pub created_folders: usize,
     pub bindings_written: usize,
+    /// Captured before commit from this transaction's own writes, never from
+    /// a later read that could accept an intervening user move as the baseline.
+    pub created_target_snapshots: Vec<DirectoryTargetSnapshot>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -1285,12 +1299,22 @@ impl PortableStore {
 
         store_organization(&transaction, &envelope.state)?;
         store_counter(&transaction, envelope.counter)?;
+        let created_target_snapshots = if created_ids.is_empty() {
+            Vec::new()
+        } else {
+            let projection = crate::library_organization::project_folder_tree(&envelope.state);
+            created_ids
+                .iter()
+                .filter_map(|id| directory_target_snapshot(&envelope.state, &projection, id))
+                .collect()
+        };
         transaction.commit()?;
 
         Ok(DirectoryImportBatchOutcome {
             placements: placement_outcomes,
             created_folders,
             bindings_written,
+            created_target_snapshots,
         })
     }
 
@@ -3389,6 +3413,158 @@ mod directory_import_batch_tests {
         assert_eq!(error.code, "invalid-data");
         let state = load_organization(&store.connection).unwrap();
         assert!(!state.folders.contains_key(FOLDER_G));
+        assert!(store.directory_bindings().unwrap().is_empty());
+    }
+
+    #[test]
+    fn directory_target_guard_keeps_created_chain_across_batches() {
+        for change in ["unchanged", "moved", "dissolved"] {
+            let mut store = PortableStore::open_in_memory().unwrap();
+            known_book(&store, HASH_A);
+            known_book(&store, HASH_B);
+            create_folder(&mut store, FOLDER_X, None);
+            // Neither target existed during the directory scan.
+            let creates = [
+                DirectoryFolderCreate {
+                    folder_id: FOLDER_F.into(),
+                    name: "父".into(),
+                    parent_id: None,
+                },
+                DirectoryFolderCreate {
+                    folder_id: FOLDER_G.into(),
+                    name: "子".into(),
+                    parent_id: Some(FOLDER_F.into()),
+                },
+            ];
+            let first = store
+                .apply_directory_import_batch(
+                    &creates,
+                    &[request(
+                        HASH_A,
+                        Some(FOLDER_G),
+                        observe(&store, HASH_A),
+                        false,
+                    )],
+                    &[DirectoryBindingWrite {
+                        directory_key: "first-batch".into(),
+                        folder_id: FOLDER_G.into(),
+                    }],
+                    &[],
+                    |_, _, _| DirectoryPlacementDecision::Move,
+                )
+                .unwrap();
+            assert_eq!(first.created_target_snapshots.len(), 2);
+            assert_eq!(
+                first
+                    .created_target_snapshots
+                    .iter()
+                    .find(|s| s.folder_id == FOLDER_G)
+                    .unwrap()
+                    .ancestor_ids,
+                vec![FOLDER_F]
+            );
+            match change {
+                "moved" => {
+                    store
+                        .apply_organization_command(&OrganizationCommand::MoveFolder {
+                            folder_id: FOLDER_F.into(),
+                            parent_id: Some(FOLDER_X.into()),
+                        })
+                        .unwrap();
+                }
+                "dissolved" => {
+                    store
+                        .apply_organization_command(&OrganizationCommand::DeleteFolder {
+                            folder_id: FOLDER_F.into(),
+                        })
+                        .unwrap();
+                }
+                _ => {}
+            }
+            let before = load_organization(&store.connection).unwrap();
+            let bindings_before = store.directory_bindings().unwrap();
+            let counter_before = store.counter().unwrap();
+            let second = store.apply_directory_import_batch(
+                &creates,
+                &[request(
+                    HASH_B,
+                    Some(FOLDER_G),
+                    observe(&store, HASH_B),
+                    false,
+                )],
+                &[DirectoryBindingWrite {
+                    directory_key: "second-batch".into(),
+                    folder_id: FOLDER_G.into(),
+                }],
+                &first.created_target_snapshots,
+                |_, _, _| DirectoryPlacementDecision::Move,
+            );
+            if change == "unchanged" {
+                let second = second.unwrap();
+                assert_eq!(second.created_folders, 0);
+                assert!(second.created_target_snapshots.is_empty());
+                assert_eq!(
+                    effective_folder_id(&load_organization(&store.connection).unwrap(), HASH_B),
+                    Some(FOLDER_G)
+                );
+            } else {
+                assert_eq!(second.unwrap_err().code, "invalid-data", "{change}");
+                // Reject only this batch; retain the first batch and the user's change.
+                assert_eq!(load_organization(&store.connection).unwrap(), before);
+                assert_eq!(store.directory_bindings().unwrap(), bindings_before);
+                assert_eq!(store.counter().unwrap(), counter_before);
+            }
+            assert!(book_meta_exists(&store.connection, HASH_A).unwrap());
+            assert!(book_meta_exists(&store.connection, HASH_B).unwrap());
+        }
+    }
+
+    #[test]
+    fn directory_target_guard_detects_same_depth_ancestor_move() {
+        let mut store = PortableStore::open_in_memory().unwrap();
+        known_book(&store, HASH_A);
+        create_folder(&mut store, FOLDER_F, None);
+        create_folder(&mut store, FOLDER_G, None);
+        create_folder(&mut store, FOLDER_X, Some(FOLDER_F));
+        let target = "00000000-0000-4000-8000-0000000000f3";
+        create_folder(&mut store, target, Some(FOLDER_X));
+        let expected = store
+            .directory_target_snapshots_for(&[target.into()])
+            .unwrap()[target]
+            .clone();
+        store
+            .apply_organization_command(&OrganizationCommand::MoveFolder {
+                folder_id: FOLDER_X.into(),
+                parent_id: Some(FOLDER_G.into()),
+            })
+            .unwrap();
+        let current = store
+            .directory_target_snapshots_for(&[target.into()])
+            .unwrap()[target]
+            .clone();
+        assert_eq!(current.depth, expected.depth);
+        assert_eq!(current.effective_parent_id, expected.effective_parent_id);
+        assert_ne!(current.ancestor_ids, expected.ancestor_ids);
+        let before = load_organization(&store.connection).unwrap();
+        let error = store
+            .apply_directory_import_batch(
+                &[],
+                &[request(
+                    HASH_A,
+                    Some(target),
+                    observe(&store, HASH_A),
+                    false,
+                )],
+                &[DirectoryBindingWrite {
+                    directory_key: "stale-path".into(),
+                    folder_id: target.into(),
+                }],
+                &[expected],
+                |_, _, _| DirectoryPlacementDecision::Move,
+            )
+            .unwrap_err();
+        assert_eq!(error.code, "invalid-data");
+        assert_eq!(load_organization(&store.connection).unwrap(), before);
         assert!(store.directory_bindings().unwrap().is_empty());
     }
 

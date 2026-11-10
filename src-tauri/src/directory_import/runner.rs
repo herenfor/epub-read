@@ -598,6 +598,10 @@ impl RunnerState {
         outcome: DirectoryImportBatchOutcome,
         hash_to_input: &HashMap<String, String>,
     ) {
+        // These snapshots belong to the successful transaction. Retain them
+        // across batches, so folders created by this job get the same move /
+        // deletion protection as folders present during the scan.
+        self.target_checks.extend(outcome.created_target_snapshots);
         self.counts.created_folders = self
             .counts
             .created_folders

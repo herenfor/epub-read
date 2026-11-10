@@ -570,6 +570,7 @@ mod tests {
                 folder_id: "current".into(),
                 effective_parent_id: Some("parent".into()),
                 depth: 3,
+                ancestor_ids: vec!["root".into(), "parent".into()],
             },
         )]);
         job.set_scan(
