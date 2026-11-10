@@ -194,6 +194,7 @@ function ResultLines({ result }: { result: ImportResult }) {
   const marks = result.notesAdded + result.bookmarksAdded;
   if (marks > 0) lines.push(t("readestImport.done.records", { notes: result.notesAdded, bookmarks: result.bookmarksAdded }));
   if (result.progressWritten > 0) lines.push(t("readestImport.done.progress", { count: result.progressWritten }));
+  if (result.booksClassified > 0) lines.push(t("readestImport.done.classified", { count: result.booksClassified }));
   if (result.booksAlready > 0) lines.push(t("readestImport.done.already", { count: result.booksAlready }));
   if (result.skippedExisting > 0) lines.push(t("readestImport.done.skipped", { count: result.skippedExisting }));
   if (lines.length === 0) lines.push(t("readestImport.done.nothing"));

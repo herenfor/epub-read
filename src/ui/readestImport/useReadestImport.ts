@@ -316,6 +316,20 @@ export function useReadestImport({ shelfEntriesRef, refreshShelfProjection, setS
 
     let batch: Array<{ title: string; payload: ReadestBookImportPayload; records: number; approximate: ImportResult["approximate"] }> = [];
     const stagedHashes: string[] = [];
+    const queuedBooks = new Map<string, ReadestBookImportPayload>();
+    const queueFolder = (row: ImportRow, local: LocalImportBook): void => {
+      if (!row.folderPath?.length) return;
+      const existing = queuedBooks.get(local.bookHash);
+      if (existing) existing.folderPath = row.folderPath;
+      else {
+        const payload: ReadestBookImportPayload = {
+          bookHash: local.bookHash, readestHash: row.readestHash, targetToken: local.targetToken,
+          bookmarks: [], notes: [], folderPath: row.folderPath,
+        };
+        queuedBooks.set(local.bookHash, payload);
+        batch.push({ title: row.title, records: 0, approximate: [], payload });
+      }
+    };
     const commitBooks = async (items: typeof batch): Promise<void> => {
       const outcome = await commitReadestImport(session.id, items.map((item) => item.payload), undefined, stagedHashes);
       addOutcome(result, outcome);
@@ -350,6 +364,7 @@ export function useReadestImport({ shelfEntriesRef, refreshShelfProjection, setS
         result.unplaced.push(...built.unplaced);
         if (built.payload) {
           batch.push({ title: row.title, payload: built.payload, records: built.records, approximate: built.approximate });
+          queuedBooks.set(local.bookHash, built.payload);
           if (batch.reduce((sum, item) => sum + item.records, 0) > READEST_COMMIT_MAX_RECORDS) throw new Error(uiText("readestImport.fail.tooMany"));
         } else if (built.records > 0) {
           throw new Error(uiText("readestImport.fail.tooMany"));
@@ -366,7 +381,8 @@ export function useReadestImport({ shelfEntriesRef, refreshShelfProjection, setS
       for (const row of chosen.filter((item) => item.kind === "existing")) {
         if (stopRef.current || !current(session)) break;
         show(row.title);
-        await queueRecords(row, row.local!);
+        if (row.records) await queueRecords(row, row.local!);
+        queueFolder(row, row.local!);
         done += 1;
       }
 
@@ -393,6 +409,7 @@ export function useReadestImport({ shelfEntriesRef, refreshShelfProjection, setS
             progressPct: item.progress?.display?.value?.progressPctHint ?? null,
           };
           if (row.records) await queueRecords(row, local, true);
+          queueFolder(row, local);
         }
         done += chunk.length;
       }

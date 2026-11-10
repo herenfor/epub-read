@@ -80,6 +80,7 @@ export interface ImportRow {
   /** Position, bookmarks and notes can be converted (EPUB only). */
   records: boolean;
   selected: boolean;
+  folderPath?: string[];
 }
 
 /** Readest formats SeLis can open; anything else is "unsupported", not "missing". */
@@ -105,7 +106,7 @@ export function importRows(
   const rows: ImportRow[] = [];
   for (const book of library) {
     if (book.deleted) continue;
-    const base = { readestHash: book.hash, title: book.title, author: book.author };
+    const base = { readestHash: book.hash, title: book.title, author: book.author, ...(book.folderPath ? { folderPath: book.folderPath } : {}) };
     const local = localByDigest.get(book.hash);
     const file = fileByHash.get(book.hash);
     if (local) {
@@ -115,7 +116,7 @@ export function importRows(
         format: extension(local.fileName) || book.format,
         local,
         records,
-        ...(records
+        ...(records || book.folderPath?.length
           ? { kind: "existing", selected: true }
           : { kind: "unavailable", reason: "shelved-no-records", selected: false }),
       });
@@ -265,6 +266,7 @@ export interface FailedBook {
 /** What the result screen reports. */
 export interface ImportResult {
   booksAdded: number;
+  booksClassified: number;
   /** Chosen as new, but the same file was already on the shelf. */
   booksAlready: number;
   bookmarksAdded: number;
@@ -285,11 +287,12 @@ export interface ImportResult {
 }
 
 export const emptyResult = (): ImportResult => ({
-  booksAdded: 0, booksAlready: 0, bookmarksAdded: 0, notesAdded: 0, progressWritten: 0, skippedExisting: 0,
+  booksAdded: 0, booksClassified: 0, booksAlready: 0, bookmarksAdded: 0, notesAdded: 0, progressWritten: 0, skippedExisting: 0,
   unplaced: [], approximate: [], unsupported: 0, failed: [], stopped: false, notReached: 0, error: null,
 });
 
 export function addOutcome(result: ImportResult, outcome: ReadestImportOutcome): void {
+  result.booksClassified += outcome.booksClassified ?? 0;
   result.bookmarksAdded += outcome.bookmarksAdded;
   result.notesAdded += outcome.notesAdded;
   result.progressWritten += outcome.progressWritten;

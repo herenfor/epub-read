@@ -64,6 +64,61 @@ fn commit(store: &mut PortableStore, book: ReadestBookImport) -> ReadestImportOu
         .unwrap()
 }
 
+fn folder_plan(hash: &str, path: &[&str]) -> ReadestBookImport {
+    let mut book = plan(0);
+    book.book_hash = hash.into();
+    book.progress = None;
+    book.bookmarks.clear();
+    book.notes.clear();
+    book.folder_path = Some(path.iter().map(|s| (*s).into()).collect());
+    book
+}
+
+#[test]
+fn readest_folders_preserve_five_levels_and_repeat_without_reclassifying_local_books() {
+    let mut store = store();
+    let book = folder_plan(HASH, &["Root", "Child", "3", "4", "5"]);
+    let outcome = commit(&mut store, book.clone());
+    assert_eq!(outcome.imported_books, 1);
+    assert_eq!(outcome.books_classified, 1);
+    let state = store.snapshot().unwrap();
+    let leaf = crate::library_organization::effective_folder_id(&state.organization, HASH).unwrap();
+    assert_eq!(state.organization.folders.len(), 5);
+    assert_eq!(crate::library_organization::effective_folder_depth(&state.organization, leaf), Some(5));
+    assert_eq!(commit(&mut store, book).imported_books, 0);
+    // An existing local assignment wins even when a later Readest import differs.
+    assert_eq!(commit(&mut store, folder_plan(HASH, &["Different"])).imported_books, 0);
+    assert_eq!(store.snapshot().unwrap(), state);
+}
+
+#[test]
+fn readest_folders_reuse_only_matching_siblings_and_rollback_with_the_originals() {
+    let mut store = store();
+    commit(&mut store, folder_plan(HASH, &["Root", "Child"]));
+    let before = store.snapshot().unwrap();
+    let hash = "c".repeat(64);
+    let book = folder_plan(&hash, &["Other", "Child"]);
+    let pending = pending_target(&store, &hash);
+    let session = active();
+    let result = store.import_readest_bundle(&[(pending.clone(), book.clone())], &[bundle_original(&hash)], 100, &|| false, |tx, _| {
+        session.close()?;
+        session.finish(tx, &|| true, &[])
+    });
+    assert_eq!(result.unwrap_err().code, "cancelled");
+    assert_eq!(store.snapshot().unwrap(), before);
+    assert!(store.binding_raw(&hash).unwrap().is_none());
+    store.import_readest_bundle(&[(pending, book)], &[bundle_original(&hash)], 101, &|| false, |tx, _| { tx.commit()?; Ok(()) }).unwrap();
+    let state = store.snapshot().unwrap();
+    assert_eq!(state.organization.folders.len(), 4);
+    assert_ne!(crate::library_organization::effective_folder_id(&state.organization, HASH), crate::library_organization::effective_folder_id(&state.organization, &hash));
+    let hash2 = "d".repeat(64);
+    let pending2 = pending_target(&store, &hash2);
+    store.import_readest_bundle(&[(pending2, folder_plan(&hash2, &["Root", "Child"]))], &[bundle_original(&hash2)], 102, &|| false, |tx, _| { tx.commit()?; Ok(()) }).unwrap();
+    let state = store.snapshot().unwrap();
+    assert_eq!(state.organization.folders.len(), 4);
+    assert_eq!(crate::library_organization::effective_folder_id(&state.organization, HASH), crate::library_organization::effective_folder_id(&state.organization, &hash2));
+}
+
 #[test]
 fn readest_partial_md5_matches_ranges_and_bounds_large_source_reads() {
     assert_eq!(

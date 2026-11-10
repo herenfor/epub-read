@@ -8,6 +8,7 @@
  */
 
 import { isNoteStyle, type NoteStyle } from "../notes";
+import { MAX_FOLDER_DEPTH } from "../libraryOrganization";
 
 export const READEST_LIBRARY_ENTRY = "library.json";
 export const readestConfigEntry = (hash: string): string => `${hash}/config.json`;
@@ -30,6 +31,22 @@ export interface ReadestLibraryBook {
   originalFilename: string | null;
   /** Tombstoned in Readest; listed for the user but never propagated. */
   deleted: boolean;
+  /** Classification only; never retain Readest's local source path. */
+  folderPath?: string[];
+}
+
+function readestFolderPath(raw: Record<string, unknown>): string[] | undefined {
+  const name = typeof raw.groupName === "string" ? raw.groupName.trim() : "";
+  if (!name) return undefined;
+  // Readest's directory import stores a flattened group name such as A/B/C.
+  // Only interpret it as a tree when the source parent path confirms that
+  // suffix; a manually named group containing '/' remains one folder.
+  const source = typeof raw.filePath === "string" ? raw.filePath.replace(/\\/g, "/") : "";
+  const parent = source.slice(0, source.lastIndexOf("/"));
+  const parts = name.split("/");
+  const directoryGroup = parts.length > 1 && parts.every((part) => part.trim() && part !== "." && part !== "..")
+    && (parent === name || parent.endsWith(`/${name}`));
+  return (directoryGroup ? parts : [name]).slice(0, MAX_FOLDER_DEPTH).map((part) => part.trim());
 }
 
 export type ReadestParseFailure = "invalid-json" | "unexpected-shape" | "too-large";
@@ -73,6 +90,7 @@ export function parseReadestLibrary(text: string): ReadestParseResult<{ books: R
       continue;
     }
     seen.add(hash);
+    const folderPath = readestFolderPath(raw);
     books.push({
       hash,
       format: (shortString(raw.format, 16) ?? "").toUpperCase(),
@@ -80,6 +98,7 @@ export function parseReadestLibrary(text: string): ReadestParseResult<{ books: R
       author: shortString(raw.author) ?? "",
       originalFilename: shortString(raw.originalFilename),
       deleted: timestamp(raw.deletedAt) !== null,
+      ...(folderPath ? { folderPath } : {}),
     });
   }
   return { ok: true, value: { books, ignored } };

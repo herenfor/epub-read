@@ -77,6 +77,8 @@ export interface ReadestBookImportPayload {
   targetToken: string;
   /** Omitted when the user keeps the local position; never null. */
   progress?: { locator: Locator; progressPctHint: number };
+  /** Source classification, at most five levels; existing local placement wins. */
+  folderPath?: string[];
   bookmarks: Array<{ sourceKey: string; value: BookmarkValue }>;
   notes: Array<{ sourceKey: string; value: NoteValue }>;
 }
@@ -85,6 +87,7 @@ export interface ReadestImportOutcome {
   importedBooks: number;
   booksAdded?: number;
   booksAlready?: number;
+  booksClassified?: number;
   bookmarksAdded: number;
   notesAdded: number;
   progressWritten: number;

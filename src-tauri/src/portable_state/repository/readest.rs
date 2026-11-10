@@ -29,6 +29,8 @@ pub(crate) struct ReadestBookImport {
     pub book_hash: String,
     pub readest_hash: String,
     pub target_token: String,
+    #[serde(default)]
+    pub folder_path: Option<Vec<String>>,
     /// Omission means don't replace progress; explicit null is not a value.
     #[serde(default, deserialize_with = "super::super::dto::deserialize_present")]
     pub progress: Option<Progress>,
@@ -42,6 +44,7 @@ pub(crate) struct ReadestImportOutcome {
     pub imported_books: usize,
     pub books_added: usize,
     pub books_already: usize,
+    pub books_classified: usize,
     pub bookmarks_added: usize,
     pub notes_added: usize,
     pub progress_written: usize,
@@ -402,6 +405,13 @@ impl PortableStore {
                 changed.insert(book.book_hash.clone());
             }
         }
+        let classified = super::readest_folders::apply(
+            &transaction, books.iter().filter_map(|(_, book)| {
+                book.folder_path.as_deref().map(|path| (book.book_hash.as_str(), path))
+            }), &device_id, &mut counter,
+        )?;
+        outcome.books_classified = classified.len();
+        changed.extend(classified);
         store_counter(&transaction, counter)?;
         if cancelled() {
             return Err(import_error("cancelled", "迁入已取消"));

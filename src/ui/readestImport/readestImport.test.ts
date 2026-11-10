@@ -34,6 +34,20 @@ const note = (id: string, cfi: string, text: string, extra: Record<string, unkno
   ({ id, type: "annotation", cfi, text, note: `注 ${id}`, style: "highlight", color: "yellow", createdAt: 1_700_000_000_000, updatedAt: 1_700_000_000_000, ...extra });
 
 describe("Readest backup records", () => {
+  it("restores directory groups to five levels, without guessing manual group names", () => {
+    const parsed = parseReadestLibrary(JSON.stringify([
+      { hash: "a".repeat(32), groupName: "Root/第二层/3/4/5/6/7", filePath: "C:\\Books\\Root\\第二层\\3\\4\\5\\6\\7\\book.epub" },
+      { hash: "b".repeat(32), groupName: "Science/Fiction", filePath: "/books/book.epub" },
+      { hash: "c".repeat(32), groupName: "Other/Child", filePath: "/books/Other/Child/book.epub" },
+      { hash: "d".repeat(32) },
+    ]));
+    expect(parsed.ok && parsed.value.books.map((book) => book.folderPath)).toEqual([
+      ["Root", "第二层", "3", "4", "5"], ["Science/Fiction"], ["Other", "Child"], undefined,
+    ]);
+    // Local paths are evidence for interpreting the source, never output data.
+    expect(JSON.stringify(parsed)).not.toContain("filePath");
+  });
+
   it("keeps only valid library rows and flags tombstones without acting on them", () => {
     const result = parseReadestLibrary(JSON.stringify([
       { hash: HASH.toUpperCase(), format: "EPUB", title: "  书名 ", author: "作者", originalFilename: "a.epub", createdAt: 1, updatedAt: 1 },

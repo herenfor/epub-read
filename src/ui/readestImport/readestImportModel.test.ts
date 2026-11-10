@@ -15,6 +15,13 @@ const locator = { locatorVersion: 1, chapterPath: "c.xhtml", spineIndexHint: 0, 
 const progress = (pct: number) => candidate<ProgressValue>("p", "exact", { locator, progressPctHint: pct } as unknown as ProgressValue);
 
 describe("Readest import model", () => {
+  it("offers classification-only migration for an existing non-EPUB", () => {
+    const source = { ...book("1", "TXT"), folderPath: ["Root", "Text"] };
+    expect(importRows([source], [local("x", "1", "book.txt")], [])[0]).toMatchObject({
+      kind: "existing", selected: true, records: false, folderPath: ["Root", "Text"],
+    });
+  });
+
   it("keeps only shelf books the native side could sample", () => {
     const books = localImportBooks(
       [{ id: "a", contentHash: "ha", title: "A", fileName: "a.epub" }, { id: "b", contentHash: "hb", title: "B", fileName: "b.epub" }],

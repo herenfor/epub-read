@@ -87,6 +87,24 @@ async function setup(options: { withLocalBook?: boolean; platform?: string } = {
 }
 
 describe("Readest import flow", () => {
+  it("commits classification for existing and staged books even without a config or records", async () => {
+    ports.library = ports.library.map((book) => ({ ...(book as Record<string, unknown>), folderPath: ["Root", "Child"] }));
+    ports.config.mockResolvedValue(null);
+    ports.commit.mockResolvedValue({ ...outcome, booksClassified: 2 });
+    const t = await setup({ withLocalBook: true });
+    try {
+      await t.dom.run(async () => { await t.start("backup.zip"); });
+      await t.dom.run(async () => { await t.current().run(); });
+      expect(ports.commit).toHaveBeenCalledTimes(1);
+      expect(ports.commit.mock.calls[0][1]).toEqual(expect.arrayContaining([
+        expect.objectContaining({ bookHash: "a".repeat(64), folderPath: ["Root", "Child"], bookmarks: [], notes: [] }),
+        expect.objectContaining({ bookHash: newEntry.contentHash, folderPath: ["Root", "Child"], bookmarks: [], notes: [] }),
+      ]));
+      expect(ports.convert).not.toHaveBeenCalled();
+      expect(t.current().state).toMatchObject({ kind: "done", result: { booksClassified: 2, failed: [], error: null } });
+    } finally { await t.dom.dispose(); }
+  });
+
   it("offers the Readest library found on this computer and opens it as a folder source", async () => {
     ports.probe.mockResolvedValue({ path: "/data/Readest/Books", books: 2 });
     const t = await setup();

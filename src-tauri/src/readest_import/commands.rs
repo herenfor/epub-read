@@ -427,8 +427,10 @@ pub async fn readest_import_commit(
             let mut seen = BTreeSet::new();
             let mut plan = Vec::new();
             for book in books {
+                let folder_only = book.folder_path.is_some() && book.progress.is_none()
+                    && book.bookmarks.is_empty() && book.notes.is_empty();
                 if !seen.insert(book.book_hash.clone())
-                    || !data.configs_read.contains(&book.readest_hash)
+                    || (!folder_only && !data.configs_read.contains(&book.readest_hash))
                 {
                     return Err(error("invalid-request", "请先读取所选书籍的备份配置"));
                 }

@@ -6,6 +6,7 @@
 
 mod shelf_move;
 mod readest;
+mod readest_folders;
 pub(crate) use readest::{
     KoreaderProgressImport, KoreaderProgressOutcome, ReadestAnnotation, ReadestBookImport,
     ReadestImportOutcome, ReadestTarget,
