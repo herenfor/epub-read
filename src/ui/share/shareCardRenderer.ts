@@ -1,9 +1,9 @@
 import { ICON_BOX, ICON_PAGES_PATH, ICON_RADIUS, WORDMARK_ADVANCE, WORDMARK_BASELINE, WORDMARK_PATH } from "./brandMark";
 import {
-  canUseVertical, isLatinText, shareCardPalette, shareCardSize,
+  canUseVertical, isLatinText, shareCardPalette, shareCardSize, SHARE_CARD_WIDTH, SHARE_LONG_MAX_HEIGHT, SHARE_LONG_MIN_HEIGHT,
   type ShareCardContent, type ShareCardOptions, type ShareCardPalette,
 } from "./shareCardModel";
-import { ellipsize, fitText, verticalGlyph, type Measure } from "./shareLayout";
+import { ellipsize, fitText, fittedBlockSize, verticalGlyph, type FitResult, type Measure } from "./shareLayout";
 import { tidyPassage } from "./shareText";
 
 /**
@@ -46,6 +46,84 @@ export type ShareCardContext = Pick<CanvasRenderingContext2D,
   fill(path?: Path2D | CanvasFillRule): void;
 };
 
+/** A long card keeps one comfortable text size and grows instead (ER-0162). */
+const LONG_QUOTE_CQ = { cjk: 4.4, latin: 4.2 };
+/** Room between paragraphs on a long card, as a multiple of the text size. */
+const LONG_PARAGRAPH_GAP = 0.7;
+
+/** Everything about a card that is decided before any pixel is drawn. */
+interface CardPlan {
+  W: number;
+  H: number;
+  cq: number;
+  pad: number;
+  contentW: number;
+  quote: string;
+  note: string;
+  latin: boolean;
+  template: ShareCardOptions["template"];
+  palette: ShareCardPalette;
+  cover: CanvasImageSource | null;
+  footerH: number;
+  bodyTop: number;
+  bodyH: number;
+  maxPx: number;
+  minPx: number;
+  notePx: number;
+  /** The horizontal passage and note, already broken into lines; null on a vertical card. */
+  horizontal: HorizontalPlan | null;
+}
+
+const COVER_W_CQ = 8.5, TITLE_CQ = 3.6, META_CQ = 2.7, ICON_CQ = 4, ACCENT_H_CQ = 0.9;
+
+function planShareCard(ctx: ShareCardContext, content: ShareCardContent, options: ShareCardOptions, assets: ShareCardAssets): CardPlan {
+  const W = SHARE_CARD_WIDTH;
+  const cq = W / 100;
+  const long = options.ratio === "long";
+  const quote = tidyPassage(content.quote);
+  const latin = isLatinText(quote);
+  const template = options.template === "vertical" && !canUseVertical(quote, options.ratio) ? "paper" : options.template;
+  const vertical = template === "vertical";
+  const palette = shareCardPalette(template, content.accent, assets.coverTone);
+  const note = options.showNote ? tidyPassage(content.note ?? "") : "";
+
+  const pad = 9 * cq;
+  const contentW = W - pad * 2;
+  const cover = options.showCover ? assets.cover ?? null : null;
+  const textBlockH = TITLE_CQ * cq * 1.3 + 0.6 * cq + META_CQ * cq * 1.3;
+  const footerH = Math.max(cover ? COVER_W_CQ * cq * 1.5 : textBlockH, options.showBrand ? ICON_CQ * cq : 0);
+  const bodyTop = vertical ? pad : pad + ACCENT_H_CQ * cq + 4.5 * cq;
+  // Under the body: a gap, the hairline, a gap, the footer, the bottom padding.
+  const belowBody = 4.5 * cq + 4 * cq + footerH + pad * 0.78;
+
+  const longPx = (latin ? LONG_QUOTE_CQ.latin : LONG_QUOTE_CQ.cjk) * cq;
+  const maxPx = long ? longPx : (options.ratio === "9:16" ? 7.4 : options.ratio === "1:1" ? 6 : 6.6) * cq;
+  const minPx = long ? longPx : (latin ? 3.9 : 4.1) * cq;
+  const notePx = 3.3 * cq;
+  const body = { contentW, maxPx, minPx, notePx, cq, long };
+
+  let H = shareCardSize(options.ratio).height;
+  let horizontal: HorizontalPlan | null = null;
+  if (long) {
+    const natural = planHorizontalBody(ctx, quote, note, latin, { ...body, bodyH: Infinity });
+    const wanted = Math.ceil(bodyTop + natural.height + belowBody);
+    H = Math.min(SHARE_LONG_MAX_HEIGHT, Math.max(SHARE_LONG_MIN_HEIGHT, wanted));
+    if (wanted <= H) horizontal = natural;
+  }
+  const bodyH = H - bodyTop - belowBody;
+  if (!vertical && !horizontal) horizontal = planHorizontalBody(ctx, quote, note, latin, { ...body, bodyH });
+
+  return { W, H, cq, pad, contentW, quote, note, latin, template, palette, cover, footerH, bodyTop, bodyH, maxPx, minPx, notePx, horizontal };
+}
+
+/**
+ * The card's export height. Fixed for the three ratios; a long card is as
+ * tall as its passage and note need. Size the canvas with this before drawing.
+ */
+export function shareCardHeight(ctx: ShareCardContext, content: ShareCardContent, options: ShareCardOptions, assets: ShareCardAssets = {}): number {
+  return options.ratio === "long" ? planShareCard(ctx, content, options, assets).H : shareCardSize(options.ratio).height;
+}
+
 export function drawShareCard(
   ctx: ShareCardContext,
   content: ShareCardContent,
@@ -53,31 +131,18 @@ export function drawShareCard(
   assets: ShareCardAssets = {},
   makePath: (d: string) => Path2D = (d) => new Path2D(d),
 ): ShareCardDrawResult {
-  const { width: W, height: H } = shareCardSize(options.ratio);
-  const cq = W / 100;
-  const quote = tidyPassage(content.quote);
-  const latin = isLatinText(quote);
-  const template = options.template === "vertical" && !canUseVertical(quote) ? "paper" : options.template;
-  const vertical = template === "vertical";
-  const palette = shareCardPalette(template, content.accent, assets.coverTone);
-  const note = options.showNote ? tidyPassage(content.note ?? "") : "";
+  const plan = planShareCard(ctx, content, options, assets);
+  const { W, H, cq, pad, contentW, palette, cover, footerH, bodyTop, bodyH, template } = plan;
 
   ctx.save();
   ctx.fillStyle = palette.bg;
   ctx.fillRect(0, 0, W, H);
 
-  const pad = 9 * cq;
-  const padBottom = pad * 0.78;
-  const contentW = W - pad * 2;
-
   // ---- Footer: book on the left, brand on the right, a hairline above. ----
-  const cover = options.showCover ? assets.cover ?? null : null;
-  const coverW = 8.5 * cq, coverH = coverW * 1.5;
-  const titlePx = 3.6 * cq, metaPx = 2.7 * cq;
+  const coverW = COVER_W_CQ * cq, coverH = coverW * 1.5;
+  const titlePx = TITLE_CQ * cq, metaPx = META_CQ * cq;
   const textBlockH = titlePx * 1.3 + 0.6 * cq + metaPx * 1.3;
-  const iconSize = 4 * cq;
-  const footerH = Math.max(cover ? coverH : textBlockH, options.showBrand ? iconSize : 0);
-  const footerBottom = H - padBottom;
+  const footerBottom = H - pad * 0.78;
   const footerTop = footerBottom - footerH;
   const ruleY = footerTop - 4 * cq;
   ctx.fillStyle = palette.rule;
@@ -107,22 +172,15 @@ export function drawShareCard(
   }
 
   // ---- Body: the passage, then the reader's note, centred in what is left. ----
-  const accentH = 0.9 * cq;
-  const bodyTop = vertical ? pad : pad + accentH + 4.5 * cq;
-  const bodyBottom = ruleY - 4.5 * cq;
-  const bodyH = bodyBottom - bodyTop;
-  if (!vertical) {
+  if (plan.horizontal) {
+    const accentH = ACCENT_H_CQ * cq;
     ctx.fillStyle = palette.accent;
     roundRect(ctx, pad, pad, 7 * cq, accentH, accentH / 2);
     ctx.fill();
   }
-
-  const maxPx = (options.ratio === "9:16" ? 7.4 : options.ratio === "1:1" ? 6 : 6.6) * cq;
-  const minPx = (latin ? 3.9 : 4.1) * cq;
-  const notePx = 3.3 * cq;
-  const truncated = vertical
-    ? drawVerticalBody(ctx, quote, note, palette, { pad, W, bodyTop, bodyH, contentW, maxPx, minPx, notePx, cq })
-    : drawHorizontalBody(ctx, quote, note, latin, palette, { pad, bodyTop, bodyH, contentW, maxPx, minPx, notePx, cq });
+  const truncated = plan.horizontal
+    ? drawHorizontalBody(ctx, plan.horizontal, plan.latin, palette, { pad, bodyTop, bodyH, contentW, notePx: plan.notePx, cq })
+    : drawVerticalBody(ctx, plan.quote, plan.note, palette, { pad, W, bodyTop, bodyH, contentW, maxPx: plan.maxPx, minPx: plan.minPx, notePx: plan.notePx, cq });
 
   ctx.restore();
   return { width: W, height: H, truncated, template };
@@ -130,50 +188,81 @@ export function drawShareCard(
 
 interface BodyBox { pad: number; bodyTop: number; bodyH: number; contentW: number; maxPx: number; minPx: number; notePx: number; cq: number }
 
-function drawHorizontalBody(ctx: ShareCardContext, quote: string, note: string, latin: boolean, palette: ShareCardPalette, box: BodyBox): boolean {
-  const { pad, bodyTop, bodyH, contentW, notePx, cq } = box;
+const NOTE_INDENT_CQ = 3, NOTE_LINE_HEIGHT = 1.65, NOTE_GAP_CQ = 5;
+
+interface HorizontalPlan {
+  fit: FitResult;
+  noteFit: FitResult | null;
+  lineHeight: number;
+  spacing: number;
+  paragraphGap: number;
+  /** Height of the passage plus the note under it. */
+  height: number;
+}
+
+/**
+ * Breaks the passage and the note for a horizontal card. A fixed card keeps
+ * the note to three lines; a long card shows all of it.
+ */
+function planHorizontalBody(
+  ctx: ShareCardContext, quote: string, note: string, latin: boolean,
+  box: { contentW: number; bodyH: number; maxPx: number; minPx: number; notePx: number; cq: number; long: boolean },
+): HorizontalPlan {
+  const { contentW, bodyH, notePx, cq, long } = box;
   const spacing = latin ? 0 : 0.02;
   const lineHeight = latin ? 1.55 : 1.75;
-  const quoteFont = `{px}px ${BOOK_FONT}`;
-  const measureQuote = measureWith(ctx, quoteFont, spacing);
+  const paragraphGap = long ? LONG_PARAGRAPH_GAP : 0;
+  const gap = NOTE_GAP_CQ * cq;
 
-  const noteIndent = 3 * cq, noteLineHeight = 1.65, gap = 5 * cq;
+  const noteRoom = long ? bodyH * 0.4 : notePx * NOTE_LINE_HEIGHT * 3;
   const noteFit = note
-    ? fitText({ text: note, lineLength: contentW - noteIndent, blockSize: notePx * noteLineHeight * 3, lineHeight: noteLineHeight, maxPx: notePx, minPx: notePx, measure: measureWith(ctx, `{px}px ${UI_FONT}`), ellipsis: "…" })
+    ? fitText({ text: note, lineLength: contentW - NOTE_INDENT_CQ * cq, blockSize: noteRoom, lineHeight: NOTE_LINE_HEIGHT, maxPx: notePx, minPx: notePx, measure: measureWith(ctx, `{px}px ${UI_FONT}`), ellipsis: "…" })
     : null;
-  const noteH = noteFit ? noteFit.lines.length * notePx * noteLineHeight : 0;
+  const noteH = noteFit ? fittedBlockSize(noteFit, NOTE_LINE_HEIGHT) : 0;
 
   const fit = fitText({
-    text: quote, lineLength: contentW, blockSize: bodyH - (noteFit ? noteH + gap : 0), lineHeight,
-    maxPx: box.maxPx, minPx: box.minPx, stepPx: Math.max(1, cq * 0.2), measure: measureQuote, ellipsis: latin ? "…" : "……",
+    text: quote, lineLength: contentW, blockSize: bodyH - (noteFit ? noteH + gap : 0), lineHeight, paragraphGap,
+    maxPx: box.maxPx, minPx: box.minPx, stepPx: Math.max(1, cq * 0.2), measure: measureWith(ctx, `{px}px ${BOOK_FONT}`, spacing), ellipsis: latin ? "…" : "……",
   });
-  const quoteH = fit.lines.length * fit.fontPx * lineHeight;
-  let y = bodyTop + (bodyH - quoteH - (noteFit ? gap + noteH : 0)) / 2;
+  const height = fittedBlockSize(fit, lineHeight, paragraphGap) + (noteFit ? gap + noteH : 0);
+  return { fit, noteFit, lineHeight, spacing, paragraphGap, height };
+}
+
+function drawHorizontalBody(
+  ctx: ShareCardContext, plan: HorizontalPlan, latin: boolean, palette: ShareCardPalette,
+  box: { pad: number; bodyTop: number; bodyH: number; contentW: number; notePx: number; cq: number },
+): boolean {
+  const { pad, bodyTop, bodyH, contentW, notePx, cq } = box;
+  const { fit, noteFit, lineHeight, spacing } = plan;
+  let y = bodyTop + (bodyH - plan.height) / 2;
 
   ctx.fillStyle = palette.fg;
-  ctx.font = quoteFont.replace("{px}", String(fit.fontPx));
+  ctx.font = `${fit.fontPx}px ${BOOK_FONT}`;
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
+  const paragraphStarts = new Set(fit.paragraphStarts);
   fit.lines.forEach((line, i) => {
+    if (paragraphStarts.has(i)) y += fit.fontPx * plan.paragraphGap;
     const mid = y + fit.fontPx * lineHeight / 2;
     if (latin) {
       ctx.fillText(line, pad, mid);
     } else {
-      const last = i === fit.lines.length - 1;
-      drawSpacedLine(ctx, line, pad, mid, fit.fontPx, spacing, last ? null : contentW);
+      const paragraphEnd = i === fit.lines.length - 1 || paragraphStarts.has(i + 1);
+      drawSpacedLine(ctx, line, pad, mid, fit.fontPx, spacing, paragraphEnd ? null : contentW);
     }
     y += fit.fontPx * lineHeight;
   });
 
   if (noteFit) {
-    y += gap;
+    const noteH = fittedBlockSize(noteFit, NOTE_LINE_HEIGHT);
+    y += NOTE_GAP_CQ * cq;
     ctx.fillStyle = palette.accent;
     ctx.fillRect(pad, y + notePx * 0.2, Math.max(2, 0.5 * cq), noteH - notePx * 0.4);
     ctx.fillStyle = palette.muted;
     ctx.font = `${notePx}px ${UI_FONT}`;
     for (const line of noteFit.lines) {
-      ctx.fillText(line, pad + noteIndent, y + notePx * noteLineHeight / 2);
-      y += notePx * noteLineHeight;
+      ctx.fillText(line, pad + NOTE_INDENT_CQ * cq, y + notePx * NOTE_LINE_HEIGHT / 2);
+      y += notePx * NOTE_LINE_HEIGHT;
     }
   }
   return fit.truncated;
@@ -334,12 +423,11 @@ export function createShareCardCanvas(
   assets: ShareCardAssets = {},
   doc: Document = document,
 ): { canvas: HTMLCanvasElement; result: ShareCardDrawResult } {
-  const { width, height } = shareCardSize(options.ratio);
   const canvas = doc.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("share card: 2D canvas unavailable");
+  canvas.width = SHARE_CARD_WIDTH;
+  canvas.height = shareCardHeight(ctx, content, options, assets);
   const result = drawShareCard(ctx, content, options, assets);
   return { canvas, result };
 }

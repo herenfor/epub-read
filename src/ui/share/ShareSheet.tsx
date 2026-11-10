@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Segmented } from "../controls/Segmented";
 import { CloseIcon } from "../readerIcons";
+import { useScrollEdgeFade } from "../scrollEdgeFade";
 import { useUiText } from "../localization/UiLanguageProvider";
 import type { ShareDraft } from "../readerForeground";
 import { coverToneFromImage } from "./coverTone";
 import { canUseVertical, FALLBACK_COVER_TONE, shareCardPalette, type ShareCardContent, type ShareTemplate } from "./shareCardModel";
-import { drawShareCard, shareCardPng } from "./shareCardRenderer";
+import { drawShareCard, shareCardHeight, shareCardPng } from "./shareCardRenderer";
 import { useShareOptions } from "./shareOptions";
 import {
   canCopyImage, copyShareImage, copyShareText, saveShareImage, saveShareImageToGallery, shareActions, shareFileName,
@@ -41,9 +42,12 @@ export function ShareSheet({ draft, book, surface, onClose, onNotice }: ShareShe
   const passage = useMemo(() => tidyPassage(draft.quote), [draft.quote]);
   const sentences = useMemo(() => splitSentences(passage), [passage]);
   const [kept, setKept] = useState(sentences.length);
-  const quote = sentences.slice(0, Math.max(1, kept)).join("").trim();
+  // A long card grows with its text, so it always carries the whole passage (ER-0162).
+  const long = options.ratio === "long";
+  const shown = long ? sentences.length : Math.max(1, kept);
+  const quote = sentences.slice(0, shown).join("").trim();
   const hasNote = draft.note.trim().length > 0;
-  const verticalAllowed = canUseVertical(passage);
+  const verticalAllowed = canUseVertical(passage, options.ratio);
 
   const [cover, setCover] = useState<HTMLImageElement | null>(null);
   const [coverTone, setCoverTone] = useState<string | null>(null);
@@ -65,15 +69,21 @@ export function ShareSheet({ draft, book, surface, onClose, onNotice }: ShareShe
   }), [quote, draft.note, draft.accent, book.title, book.author, book.chapter]);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  useScrollEdgeFade(stageRef, long);
+  useLayoutEffect(() => {
+    if (stageRef.current) stageRef.current.scrollTop = 0;
+  }, [options.ratio]);
   const [truncated, setTruncated] = useState(false);
   useLayoutEffect(() => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
-    const height = options.ratio === "1:1" ? 1080 : options.ratio === "9:16" ? 1920 : 1440;
+    const assets = { cover, coverTone };
+    const height = shareCardHeight(ctx, content, options, assets);
     if (canvas.width !== 1080) canvas.width = 1080;
     if (canvas.height !== height) canvas.height = height;
-    const result = drawShareCard(ctx, content, options, { cover, coverTone });
+    const result = drawShareCard(ctx, content, options, assets);
     setTruncated(result.truncated);
   }, [content, options, cover, coverTone]);
 
@@ -154,7 +164,7 @@ export function ShareSheet({ draft, book, surface, onClose, onNotice }: ShareShe
           </button>
         </div>
 
-        <div className="share-stage">
+        <div ref={stageRef} className="share-stage scrollbar-hidden" data-long={long || undefined}>
           <canvas ref={canvasRef} className="share-canvas" role="img" aria-label={t("share.preview")} width={1080} height={1440} />
         </div>
 
@@ -167,7 +177,7 @@ export function ShareSheet({ draft, book, surface, onClose, onNotice }: ShareShe
                 const palette = shareCardPalette(id, draft.accent, coverTone ?? FALLBACK_COVER_TONE);
                 return (
                   <button key={id} type="button" role="radio" aria-checked={activeTemplate === id} disabled={disabled}
-                    className="share-thumb" title={disabled ? t("share.template.verticalOnlyCjk") : label}
+                    className="share-thumb" title={!disabled ? label : canUseVertical(passage) ? t("share.template.verticalNotLong") : t("share.template.verticalOnlyCjk")}
                     onClick={() => updateShareOptions({ template: id })}>
                     <i className={id === "vertical" ? "is-vertical" : undefined} style={{ background: palette.bg, color: palette.fg }}>
                       {id === "vertical" ? "文字" : "文"}
@@ -179,13 +189,14 @@ export function ShareSheet({ draft, book, surface, onClose, onNotice }: ShareShe
             </div>
           </div>
 
-          <div className="share-group">
+          <div className="share-group is-ratio">
             <span className="share-label">{t("share.ratio")}</span>
             <Segmented label={t("share.ratio")} value={options.ratio} variant="compact"
               options={[
                 { value: "3:4", label: t("share.ratio.portrait") },
                 { value: "1:1", label: t("share.ratio.square") },
                 { value: "9:16", label: t("share.ratio.story") },
+                { value: "long", label: t("share.ratio.long") },
               ]}
               onChange={(ratio) => updateShareOptions({ ratio })} />
           </div>
@@ -205,7 +216,7 @@ export function ShareSheet({ draft, book, surface, onClose, onNotice }: ShareShe
             </div>
           </div>
 
-          {sentences.length > 1 && (
+          {sentences.length > 1 && !long && (
             <div className="share-group">
               <span className="share-label">{t("share.range")}</span>
               <div className="share-range">
@@ -213,11 +224,20 @@ export function ShareSheet({ draft, book, surface, onClose, onNotice }: ShareShe
                   onClick={() => setKept((n) => Math.max(1, n - 1))}>{t("share.range.less")}</button>
                 <button type="button" className="ui-quiet-btn" title={t("share.range.moreTip")} disabled={kept >= sentences.length}
                   onClick={() => setKept((n) => Math.min(sentences.length, n + 1))}>{t("share.range.more")}</button>
-                <span>{t("share.range.count", { kept: Math.max(1, kept), total: sentences.length, chars: [...quote].length })}</span>
+                <span>{t("share.range.count", { kept: shown, total: sentences.length, chars: [...quote].length })}</span>
               </div>
             </div>
           )}
-          <p className={`share-fit${truncated ? " is-truncated" : ""}`}>{truncated ? t("share.fit.truncated") : t("share.fit.auto")}</p>
+          {(!long || truncated) && (
+            <p className={`share-fit${truncated ? " is-truncated" : ""}`}>
+              {long ? t("share.fit.longTruncated") : truncated ? t("share.fit.truncated") : t("share.fit.auto")}
+              {truncated && !long && (
+                <button type="button" className="share-fit-long" onClick={() => updateShareOptions({ ratio: "long" })}>
+                  {t("share.fit.useLong")}
+                </button>
+              )}
+            </p>
+          )}
         </div>
 
         <div className="share-actions" style={{ "--share-action-count": actions.length } as CSSProperties}>

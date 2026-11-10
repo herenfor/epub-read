@@ -1,20 +1,28 @@
 /**
  * Share card contract (ER-0118): what goes on a card, the four looks, the
- * three sizes and their fixed palettes. A card is an image, so its colours
+ * sizes (three fixed, one that grows with the text) and their fixed palettes. A card is an image, so its colours
  * never follow the app theme.
  */
 
 export type ShareTemplate = "paper" | "cover" | "night" | "vertical";
-export type ShareRatio = "3:4" | "1:1" | "9:16";
+export type ShareRatio = "3:4" | "1:1" | "9:16" | "long";
 
 export const SHARE_TEMPLATES: readonly ShareTemplate[] = ["paper", "cover", "night", "vertical"];
-export const SHARE_RATIOS: readonly ShareRatio[] = ["3:4", "1:1", "9:16"];
+export const SHARE_RATIOS: readonly ShareRatio[] = ["3:4", "1:1", "9:16", "long"];
 
 /** Every card is exported 1080 px wide. */
 export const SHARE_CARD_WIDTH = 1080;
 
+/**
+ * A long card (ER-0162) is as tall as its text needs, between these bounds;
+ * past the upper bound the passage is cut like on a fixed card.
+ */
+export const SHARE_LONG_MIN_HEIGHT = 1080;
+export const SHARE_LONG_MAX_HEIGHT = 12960;
+
+/** The card's export size. For a long card this is its smallest size; shareCardHeight gives the real one. */
 export function shareCardSize(ratio: ShareRatio): { width: number; height: number } {
-  const height = ratio === "1:1" ? 1080 : ratio === "9:16" ? 1920 : 1440;
+  const height = ratio === "1:1" ? 1080 : ratio === "9:16" ? 1920 : ratio === "long" ? SHARE_LONG_MIN_HEIGHT : 1440;
   return { width: SHARE_CARD_WIDTH, height };
 }
 
@@ -103,9 +111,9 @@ export function isLatinText(text: string): boolean {
   return !CJK.test(text);
 }
 
-/** Vertical layout is offered for Chinese and Japanese passages only. */
-export function canUseVertical(quote: string): boolean {
-  return !isLatinText(quote);
+/** Vertical layout is offered for Chinese and Japanese passages only, and not on a long card. */
+export function canUseVertical(quote: string, ratio?: ShareRatio): boolean {
+  return ratio !== "long" && !isLatinText(quote);
 }
 
 export function mixHex(a: string, b: string, amountOfB: number): string {

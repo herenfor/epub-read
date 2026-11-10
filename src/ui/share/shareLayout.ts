@@ -57,8 +57,21 @@ export function breakUnits(paragraph: string): string[] {
 
 /** Lays text into lines no wider than `maxWidth`; paragraphs start new lines. */
 export function breakLines(text: string, maxWidth: number, fontPx: number, measure: Measure): string[] {
+  return breakParagraphs(text, maxWidth, fontPx, measure).lines;
+}
+
+export interface BrokenText {
+  lines: string[];
+  /** Indexes of the lines that begin the second and later paragraphs. */
+  paragraphStarts: number[];
+}
+
+/** breakLines, also reporting where each later paragraph begins. */
+export function breakParagraphs(text: string, maxWidth: number, fontPx: number, measure: Measure): BrokenText {
   const lines: string[] = [];
+  const paragraphStarts: number[] = [];
   for (const paragraph of text.split("\n")) {
+    if (lines.length) paragraphStarts.push(lines.length);
     let line = "";
     for (const unit of breakUnits(paragraph)) {
       const next = line + unit;
@@ -82,7 +95,7 @@ export function breakLines(text: string, maxWidth: number, fontPx: number, measu
     }
     lines.push(line.trimEnd());
   }
-  return lines;
+  return { lines, paragraphStarts };
 }
 
 function splitByChar(text: string, maxWidth: number, fontPx: number, measure: Measure): string[] {
@@ -113,12 +126,18 @@ export interface FitRequest {
   measure: Measure;
   /** Appended when the passage is cut. */
   ellipsis: string;
+  /** Extra room between paragraphs, as a multiple of the font size. */
+  paragraphGap?: number;
 }
 
-export interface FitResult {
+export interface FitResult extends BrokenText {
   fontPx: number;
-  lines: string[];
   truncated: boolean;
+}
+
+/** The room a fitted text takes across its lines, paragraph gaps included. */
+export function fittedBlockSize(fit: FitResult, lineHeight: number, paragraphGap = 0): number {
+  return fit.lines.length * fit.fontPx * lineHeight + fit.paragraphStarts.length * fit.fontPx * paragraphGap;
 }
 
 /**
@@ -128,21 +147,23 @@ export interface FitResult {
  */
 export function fitText(req: FitRequest): FitResult {
   const step = req.stepPx ?? 2;
-  const fits = (lines: string[], px: number) => lines.length * px * req.lineHeight <= req.blockSize + 0.5;
+  const gap = req.paragraphGap ?? 0;
+  const fits = (broken: BrokenText, px: number) =>
+    broken.lines.length * px * req.lineHeight + broken.paragraphStarts.length * px * gap <= req.blockSize + 0.5;
   for (let px = req.maxPx; px >= req.minPx; px -= step) {
-    const lines = breakLines(req.text, req.lineLength, px, req.measure);
-    if (fits(lines, px)) return { fontPx: px, lines, truncated: false };
+    const broken = breakParagraphs(req.text, req.lineLength, px, req.measure);
+    if (fits(broken, px)) return { fontPx: px, ...broken, truncated: false };
   }
   const px = req.minPx;
   const chars = [...req.text];
-  const attempt = (n: number) => breakLines(cutAt(chars, n) + req.ellipsis, req.lineLength, px, req.measure);
+  const attempt = (n: number) => breakParagraphs(cutAt(chars, n) + req.ellipsis, req.lineLength, px, req.measure);
   let lo = 0, hi = chars.length;
   while (lo < hi) {
     const mid = (lo + hi + 1) >> 1;
     if (fits(attempt(mid), px)) lo = mid;
     else hi = mid - 1;
   }
-  return { fontPx: px, lines: attempt(lo), truncated: true };
+  return { fontPx: px, ...attempt(lo), truncated: true };
 }
 
 function cutAt(chars: string[], n: number): string {
