@@ -4,6 +4,7 @@ import { annotationFromInitialStamp, legacyLocatorFromReadingFields, upgradeLega
 import { maximumPortableStateReceivedCounter, mergePortableBook, mergeRegister } from "./merge";
 import { parseLocator, parseNoteValue, parsePortableStateV3, tryParsePortableStateV3 } from "./parser";
 import { writeObserved } from "./portable-register-core";
+import { nextLocalCounter } from "./portable-write-core";
 import type { BookmarkValue, PortableStateV3, ProgressValue } from "./portable-state-types";
 
 const A = "00000000-0000-4000-8000-000000000001";
@@ -152,6 +153,24 @@ describe("portable state parser", () => {
       },
     };
     expect(maximumPortableStateReceivedCounter(withTombstone)).toBe(90);
+
+    const remoteFolder = "00000000-0000-4000-8000-0000000000aa";
+    const withParentClock: PortableStateV3 = {
+      ...fixture(),
+      organization: {
+        schemaVersion: 2,
+        folders: {
+          [remoteFolder]: {
+            name: { value: "已删夹", stamp: stamp(A, 1) },
+            parentId: { value: null, stamp: stamp(B, 100) },
+            deleted: stamp(A, 2),
+          },
+        },
+        books: {},
+      },
+    };
+    expect(maximumPortableStateReceivedCounter(withParentClock)).toBe(100);
+    expect(nextLocalCounter(0, maximumPortableStateReceivedCounter(withParentClock))).toBe(101);
     expect(mergeRegister({ value: 1, stamp: stamp(A, 2) }, { value: 1, stamp: stamp(B, 3) })).toMatchObject({ stamp: stamp(B, 3) });
     expect(() => mergeRegister({ value: 1, stamp: stamp(A, 2) }, { value: 2, stamp: stamp(A, 2) })).toThrow(/collision/);
   });

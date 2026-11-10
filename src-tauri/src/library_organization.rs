@@ -377,8 +377,10 @@ pub fn merge_into_envelope(
 /// Deterministic effective parent/depth/children projection shared with TS.
 ///
 /// Missing or deleted ancestors are skipped; live cycles are broken at the
-/// lexicographically smallest UUID in each cycle; depth beyond five is clamped
-/// to the fifth-level ancestor for display.  Raw registers are never rewritten.
+/// lexicographically smallest UUID in each cycle.  A node beyond five levels is
+/// attached to its fourth-level ancestor so the node itself occupies a real
+/// fifth-level slot; reported parent/depth/ancestors stay structurally
+/// consistent.  Raw registers are never rewritten.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FolderTreeProjection {
     pub parent_by_id: BTreeMap<String, Option<String>>,
@@ -507,8 +509,11 @@ pub fn project_folder_tree(state: &LibraryOrganization) -> FolderTreeProjection 
             parent_by_id.insert(id.clone(), base_parent.get(id).cloned().flatten());
             depth_by_id.insert(id.clone(), depth);
         } else {
+            // Attach to the fourth-level ancestor so this node itself is the
+            // fifth level.  Merely changing the reported depth while keeping
+            // the fifth-level ancestor as parent would leave a sixth level.
             let mut cursor = id.clone();
-            while base_depth.get(&cursor).copied().unwrap_or(1) > MAX_FOLDER_DEPTH {
+            while base_depth.get(&cursor).copied().unwrap_or(1) > MAX_FOLDER_DEPTH - 1 {
                 cursor = base_parent
                     .get(&cursor)
                     .cloned()
@@ -1849,10 +1854,24 @@ mod tests {
             })
             .collect();
         let deep = state(folders, vec![]);
+        for id in ids {
+            let depth = effective_folder_depth(&deep, id).unwrap();
+            assert!(depth <= MAX_FOLDER_DEPTH);
+            assert_eq!(effective_folder_ancestors(&deep, id).len() + 1, depth);
+        }
         assert_eq!(effective_folder_depth(&deep, ids[5]), Some(5));
         assert_eq!(effective_folder_depth(&deep, ids[6]), Some(5));
-        assert_eq!(effective_folder_parent(&deep, ids[5]), Some(ids[4].into()));
-        assert_eq!(effective_folder_parent(&deep, ids[6]), Some(ids[4].into()));
+        assert_eq!(effective_folder_parent(&deep, ids[5]), Some(ids[3].into()));
+        assert_eq!(effective_folder_parent(&deep, ids[6]), Some(ids[3].into()));
+        assert_eq!(
+            effective_folder_ancestors(&deep, ids[5]),
+            ids[..4].iter().map(|id| id.to_string()).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            effective_folder_children(&deep, Some(ids[3])),
+            ids[4..].iter().map(|id| id.to_string()).collect::<Vec<_>>()
+        );
+        // Raw registers and original fifth-level nodes are not rewritten.
         assert_eq!(
             deep.folders[ids[6]]
                 .parent_id
@@ -1861,6 +1880,101 @@ mod tests {
                 .value
                 .as_deref(),
             Some(ids[5])
+        );
+        assert_eq!(
+            deep.folders[ids[4]]
+                .parent_id
+                .as_ref()
+                .unwrap()
+                .value
+                .as_deref(),
+            Some(ids[3])
+        );
+    }
+
+    #[test]
+    fn two_independently_legal_moves_merge_without_creating_a_sixth_level() {
+        let ids = [
+            "00000000-0000-4000-8000-000000000401",
+            "00000000-0000-4000-8000-000000000402",
+            "00000000-0000-4000-8000-000000000403",
+            "00000000-0000-4000-8000-000000000404",
+            "00000000-0000-4000-8000-000000000405",
+            "00000000-0000-4000-8000-000000000406",
+        ];
+        let [a, b, c, d, x, y] = ids;
+        let base = state(
+            vec![
+                (a, FolderState {
+                    name: reg("a".into(), 1, DEVICE_A),
+                    parent_id: Some(reg(None, 1, DEVICE_A)),
+                    deleted: None,
+                }),
+                (b, FolderState {
+                    name: reg("b".into(), 1, DEVICE_A),
+                    parent_id: Some(reg(Some(a.into()), 1, DEVICE_A)),
+                    deleted: None,
+                }),
+                (c, FolderState {
+                    name: reg("c".into(), 1, DEVICE_A),
+                    parent_id: Some(reg(Some(b.into()), 1, DEVICE_A)),
+                    deleted: None,
+                }),
+                (d, FolderState {
+                    name: reg("d".into(), 1, DEVICE_A),
+                    parent_id: Some(reg(Some(c.into()), 1, DEVICE_A)),
+                    deleted: None,
+                }),
+                (x, FolderState {
+                    name: reg("x".into(), 1, DEVICE_A),
+                    parent_id: Some(reg(None, 1, DEVICE_A)),
+                    deleted: None,
+                }),
+                (y, FolderState {
+                    name: reg("y".into(), 1, DEVICE_A),
+                    parent_id: Some(reg(None, 1, DEVICE_A)),
+                    deleted: None,
+                }),
+            ],
+            vec![],
+        );
+        let left = apply_command(
+            &envelope(DEVICE_A, 1, base.clone()),
+            &OrganizationCommand::MoveFolder {
+                folder_id: a.into(),
+                parent_id: Some(x.into()),
+            },
+            &HashSet::new(),
+        )
+        .unwrap()
+        .state;
+        let right = apply_command(
+            &envelope(DEVICE_B, 1, base),
+            &OrganizationCommand::MoveFolder {
+                folder_id: x.into(),
+                parent_id: Some(y.into()),
+            },
+            &HashSet::new(),
+        )
+        .unwrap()
+        .state;
+        assert_eq!(effective_folder_ancestors(&left, d).len(), 4);
+        assert_eq!(effective_folder_ancestors(&right, d).len(), 3);
+
+        let merged = merge_organization(&left, &right).unwrap();
+        for id in ids {
+            let depth = effective_folder_depth(&merged, id).unwrap();
+            assert!(depth <= MAX_FOLDER_DEPTH);
+            assert_eq!(effective_folder_ancestors(&merged, id).len() + 1, depth);
+        }
+        assert_eq!(effective_folder_depth(&merged, d), Some(5));
+        assert_eq!(
+            merged.folders[d].parent_id.as_ref().unwrap().value.as_deref(),
+            Some(c)
+        );
+        assert_eq!(
+            merged.folders[x].parent_id.as_ref().unwrap().value.as_deref(),
+            Some(y)
         );
     }
 

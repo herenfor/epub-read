@@ -153,6 +153,7 @@ export function maximumPortableStateReceivedCounter(state: PortableStateV3): num
   }
   for (const folder of Object.values(state.organization.folders)) {
     observeRegister(folder.name.stamp, registerStamps);
+    observeRegister(folder.parentId?.stamp, registerStamps);
     if (folder.deleted) tombstones.push(folder.deleted);
   }
   for (const book of Object.values(state.organization.books)) {

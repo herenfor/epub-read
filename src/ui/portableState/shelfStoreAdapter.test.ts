@@ -563,6 +563,28 @@ describe("CP-I portable ShelfStore facade", () => {
     expect(next.counter).toBeGreaterThan(999);
   });
 
+  test("B5 portable counter observes parentId stamps even on deleted folders", async () => {
+    const legacy = new FakeLegacyStore([]);
+    const service = new PortableStateService(new MemoryPortableStateStorage());
+    await activatePortableShelfStore(legacy, service);
+    const store = new PortableShelfStore(legacy, service);
+    const folderId = generateFolderId();
+    const remote = "00000000-0000-4000-8000-0000000000ee";
+    await store.replacePortableRecords([], {
+      schemaVersion: 2,
+      folders: {
+        [folderId]: {
+          name: { value: "已删夹", stamp: { deviceId: remote, counter: 1 } },
+          parentId: { value: null, stamp: { deviceId: remote, counter: 1000 } },
+          deleted: { deviceId: remote, counter: 2 },
+        },
+      },
+      books: {},
+    });
+    const next = await service.reserveStamps(1);
+    expect(next.counter).toBeGreaterThan(1000);
+  });
+
   test("organization commands use the same portable envelope as book data", async () => {
     const legacy = new FakeLegacyStore([]);
     const service = new PortableStateService(new MemoryPortableStateStorage());

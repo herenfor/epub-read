@@ -237,9 +237,11 @@ export function mergeIntoEnvelope(
  * - Cycles in the live parent graph are broken at the lexicographically
  *   smallest UUID in each cycle; that node becomes a root.  Raw references are
  *   never rewritten.
- * - Nodes deeper than five are re-parented to their fifth-level ancestor, so a
- *   remotely merged invalid depth is still displayed as a bounded tree.  Local
- *   create/move commands reject such a result instead of persisting it.
+ * - Nodes deeper than five are re-parented to their fourth-level ancestor, so
+ *   each displayed node occupies a real fifth-level slot.  The effective
+ *   parent chain, depth and ancestors always describe the same structure.  A
+ *   remotely merged deeper tree is bounded for display; local create/move
+ *   commands reject such a result instead of persisting it.
  */
 export interface FolderTreeProjection {
   /** Live folder -> effective parent (null is root). */
@@ -338,10 +340,11 @@ export function projectFolderTree(state: LibraryOrganization): FolderTreeProject
       depthById.set(id, depth);
       continue;
     }
-    // Climb from this node to its depth-five ancestor.  That ancestor is a
-    // live node with base depth five, so no cycle can be introduced here.
+    // Attach the node itself to its fourth-level ancestor: it then occupies a
+    // genuine fifth-level slot.  Attaching to the fifth-level ancestor would
+    // leave a sixth level in the parent chain while only changing the number.
     let cursor = id;
-    while ((baseDepth.get(cursor) ?? 1) > MAX_FOLDER_DEPTH) {
+    while ((baseDepth.get(cursor) ?? 1) > MAX_FOLDER_DEPTH - 1) {
       cursor = baseParent.get(cursor)!;
     }
     parentById.set(id, cursor);

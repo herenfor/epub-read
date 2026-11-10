@@ -511,7 +511,7 @@ describe("nested folder projection and local placement", () => {
     expect(maxObservedCounter(merged)).toBe(9);
   });
 
-  it("clamps remotely merged depth beyond five without writing a repair event", () => {
+  it("clamps remotely merged depth by reparenting into a real fifth-level slot", () => {
     const deep = rawState([
       [F1, withParent(F1, null, 1)],
       [F2, withParent(F2, F1, 2)],
@@ -521,10 +521,58 @@ describe("nested folder projection and local placement", () => {
       [F6, withParent(F6, F5, 6)],
       [F7, withParent(F7, F6, 7)],
     ]);
+    for (const id of [F1, F2, F3, F4, F5, F6, F7]) {
+      const depth = effectiveFolderDepth(deep, id)!;
+      expect(depth).toBeLessThanOrEqual(MAX_FOLDER_DEPTH);
+      expect(effectiveFolderAncestors(deep, id)).toHaveLength(depth - 1);
+    }
     expect(effectiveFolderDepth(deep, F6)).toBe(5);
     expect(effectiveFolderDepth(deep, F7)).toBe(5);
-    expect(effectiveFolderParent(deep, F6)).toBe(F5);
-    expect(effectiveFolderParent(deep, F7)).toBe(F5);
+    expect(effectiveFolderParent(deep, F6)).toBe(F4);
+    expect(effectiveFolderParent(deep, F7)).toBe(F4);
+    expect(effectiveFolderAncestors(deep, F6)).toEqual([F1, F2, F3, F4]);
+    expect(effectiveFolderChildren(deep, F4)).toEqual([F5, F6, F7]);
+    // Raw parent registers and the five-level nodes are never rewritten.
     expect(deep.folders[F7].parentId?.value).toBe(F6);
+    expect(deep.folders[F5].parentId?.value).toBe(F4);
+  });
+
+  it("keeps the five-level invariant after two independently legal moves merge", () => {
+    const ids = [F1, F2, F3, F4, F5, F6];
+    const [a, b, c, d, x, y] = ids;
+    const base: LibraryOrganization = {
+      schemaVersion: 2,
+      folders: Object.fromEntries([
+        [a, withParent(a, null, 1)],
+        [b, withParent(b, a, 1)],
+        [c, withParent(c, b, 1)],
+        [d, withParent(d, c, 1)],
+        [x, withParent(x, null, 1)],
+        [y, withParent(y, null, 1)],
+      ]),
+      books: {},
+    };
+    const left = applyCommand(
+      { deviceId: DEVICE_A, counter: 1, state: base },
+      { type: "moveFolder", folderId: a, parentId: x },
+      new Set(),
+    ).state;
+    const right = applyCommand(
+      { deviceId: DEVICE_B, counter: 1, state: base },
+      { type: "moveFolder", folderId: x, parentId: y },
+      new Set(),
+    ).state;
+    // Each device stayed within five levels; the merge is Y->X->A->B->C->D.
+    expect(effectiveFolderAncestors(left, d)).toHaveLength(4);
+    expect(effectiveFolderAncestors(right, d)).toHaveLength(3);
+    const merged = mergeOrganization(left, right);
+    for (const id of ids) {
+      const depth = effectiveFolderDepth(merged, id)!;
+      expect(depth).toBeLessThanOrEqual(MAX_FOLDER_DEPTH);
+      expect(effectiveFolderAncestors(merged, id)).toHaveLength(depth - 1);
+    }
+    expect(effectiveFolderDepth(merged, d)).toBe(5);
+    expect(merged.folders[d].parentId?.value).toBe(c);
+    expect(merged.folders[x].parentId?.value).toBe(y);
   });
 });
