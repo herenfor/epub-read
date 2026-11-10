@@ -36,11 +36,32 @@ export const RELEASES_PAGE_URL = "https://github.com/herenfor/epub-read/releases
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
     version: "0.4.1",
-    status: "development",
+    status: "released",
+    releasedOn: "2026-11-11",
     items: [
       {
         category: "improved",
         text: "应用更新已为 GitHub 仓库迁移做好准备。建议先升级到本版，便于仓库改名后继续使用应用内更新。",
+      },
+      {
+        category: "new",
+        text: "书架支持多层文件夹，可按目录整理书库并批量移动书籍。",
+      },
+      {
+        category: "new",
+        text: "支持从 Readest 备份导入书籍与阅读记录，也可导入 KOReader 的阅读进度。",
+      },
+      {
+        category: "new",
+        text: "选中文字后可复制、标注，并生成分享长图。",
+      },
+      {
+        category: "new",
+        text: "首次提供 Linux 桌面版（deb），支持本地书架与 EPUB/TXT/漫画阅读。",
+      },
+      {
+        category: "fixed",
+        text: "修复文件夹导入、阅读恢复与书架搜索/排序状态等一批问题。",
       },
     ],
   },
