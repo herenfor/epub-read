@@ -63,7 +63,59 @@
 
 .reader-context-menu button.is-on { background: var(--btn-tint-hover); }
 .reader-context-menu button.is-danger { color: var(--ui-danger); }
-.reader-context-menu .hl-menu-chevron { padding-inline: 8px; color: var(--muted); font-size: var(--fs-caption); }
+
+/* ---- icon buttons (ER-0166): every action is an icon, so the menu is as wide in any language ---- */
+.reader-context-menu button.sm-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.reader-context-menu button.sm-btn.hl-menu-chevron { width: 24px; color: var(--muted); }
+
+/* Styles and actions share a row on a desktop and take one each under a finger. */
+.sm-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.sm-divider {
+  align-self: stretch;
+  width: var(--hairline);
+  margin: 4px 2px;
+  background: var(--panel-border);
+}
+
+/* The description of the button under the pointer, the focus ring or a held finger (useMenuTip). */
+.sm-tip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 1;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  background: var(--fg);
+  color: var(--panel-bg, #ffffff);
+  font-size: var(--fs-caption);
+  line-height: 1.35;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  animation: sm-tip-in 120ms ease-out;
+}
+
+@keyframes sm-tip-in {
+  from { opacity: 0; }
+}
 
 .hl-dot {
   display: inline-block;
@@ -98,7 +150,10 @@
 
 .hl-style-sample {
   font-family: var(--font-book, serif);
-  padding: 0 2px;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.25;
+  padding: 0 4px;
 }
 
 /* ---- custom color panel ---- */
@@ -176,6 +231,31 @@
 }
 
 .app[data-touch-ui="true"] .hl-picker-hex input { height: 44px; }
+
+/* Touch: icon buttons and the swatches beside them are 44px, three rows when the menu is open. */
+.app[data-touch-ui="true"] .reader-context-menu button.sm-btn,
+.app[data-touch-ui="true"] .reader-context-menu .hl-menu-row > button.hl-swatch {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+}
+
+.app[data-touch-ui="true"] .sm-tools {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+}
+
+.app[data-touch-ui="true"] .sm-divider {
+  width: auto;
+  height: var(--hairline);
+  margin: 0 4px;
+}
+
+.app[data-touch-ui="true"] .sm-actions .hl-menu-sep { display: none; }
+.app[data-touch-ui="true"] .sm-actions .is-danger { margin-inline-start: auto; }
 
 /* Floating undo for a delete from the highlight menu (same pill as the sidebar). */
 .reader-undo-pill {

@@ -5,6 +5,8 @@ import { NOTE_COLOR_NAMES, NOTE_STYLES, type NoteColor, type NoteStyle } from ".
 import { highlightColorProps, type HighlightTarget } from "./highlightModel";
 import type { HighlightPreferences } from "./highlightPreferences";
 import { HighlightColorPicker } from "./HighlightColorPicker";
+import { ChevronDownIcon, CopyIcon, CopyOriginalIcon, HighlighterIcon, NoteIcon, ShareIcon, TrashIcon } from "./readerIcons";
+import { useMenuTip } from "./useMenuTip";
 import "./highlightMenu.css";
 
 export interface ReaderSelectionPayload {
@@ -101,6 +103,11 @@ export function ReaderContextMenu(props: ReaderContextMenuProps) {
   const [picking, setPicking] = useState(false);
   const longPressRef = useRef<{ timer: ReturnType<typeof setTimeout> | undefined; fired: boolean }>({ timer: undefined, fired: false });
   useEffect(() => () => clearTimeout(longPressRef.current.timer), []);
+  const tips = useMenuTip(menuRef);
+  const hideTip = tips.hide;
+  const hasTarget = Boolean(props.highlight?.target);
+  // The button a description points at may be gone once the menu changes shape.
+  useEffect(() => hideTip(), [hideTip, expanded, picking, hasTarget]);
   const [placement, setPlacement] = useState<ContextMenuPlacement>(() => getContextMenuPlacement(props.position, {
     width: typeof window === "undefined" ? 1024 : window.innerWidth,
     height: typeof window === "undefined" ? 768 : window.innerHeight,
@@ -149,18 +156,26 @@ export function ReaderContextMenu(props: ReaderContextMenuProps) {
     props.onClose();
   };
 
+  /** An icon-only action: the label is its accessible name and its description bubble (ER-0166). */
+  const action = (label: string, icon: ReactNode, run: () => void, className = "") => (
+    <button type="button" role="menuitem" className={`sm-btn ${className}`.trim()} aria-label={label}
+      {...tips.bind(label)} onClick={() => { if (!tips.consumePress()) run(); }}>
+      {icon}
+    </button>
+  );
+  const bubble = tips.tip ? <span ref={tips.tipRef} className="sm-tip" aria-hidden="true">{tips.tip.label}</span> : null;
+
+  // Only when the shown text differs from the book (e.g. after character conversion).
   const copyOriginal = props.onCopyOriginal && selection.originalText && selection.originalText !== selection.text
-    ? (
-        <button type="button" role="menuitem" onClick={() => {
-          if (selection.originalText) props.onCopyOriginal?.(selection.originalText);
-          props.onClose();
-        }}>{t("readerMisc.copyOriginal")}</button>
-      )
+    ? action(t("readerMisc.copyOriginal"), <CopyOriginalIcon />, () => {
+        if (selection.originalText) props.onCopyOriginal?.(selection.originalText);
+        props.onClose();
+      })
     : null;
-  const copyButton = <button type="button" role="menuitem" onClick={copy}>{t("readerMisc.copy")}</button>;
-  const addNote = <button type="button" role="menuitem" onClick={() => { props.onClose(); props.onAddNote(selection); }}>{t("readerMisc.addNote")}</button>;
+  const copyButton = action(t("readerMisc.copy"), <CopyIcon />, copy);
+  const addNote = action(t("readerMisc.addNote"), <NoteIcon />, () => { props.onClose(); props.onAddNote(selection); });
   const shareButton = (target: HighlightTarget | null) => props.onShare
-    ? <button type="button" role="menuitem" onClick={() => { props.onClose(); props.onShare?.(selection, target); }}>{t("share.menu")}</button>
+    ? action(t("share.menu"), <ShareIcon size={20} />, () => { props.onClose(); props.onShare?.(selection, target); })
     : null;
 
   const highlight = props.highlight;
@@ -175,10 +190,10 @@ export function ReaderContextMenu(props: ReaderContextMenuProps) {
         onPointerDown={handlePointerDown}
       >
         {copyButton}
-        {/* Only when the shown text differs from the book (e.g. after character conversion). */}
         {copyOriginal}
         {addNote}
         {shareButton(null)}
+        {bubble}
       </div>
     );
   }
@@ -201,6 +216,9 @@ export function ReaderContextMenu(props: ReaderContextMenuProps) {
   };
   const endLongPress = () => clearTimeout(longPressRef.current.timer);
   const customProps = highlightColorProps(preferences.custom ? preferences.custom as NoteColor : undefined);
+  const customLabel = preferences.custom ? t("readerMisc.highlight.customUse") : t("readerMisc.highlight.customSet");
+  // The custom slot keeps its own long press (reset the color), so a held finger gets no description here.
+  const customTip = tips.bind(customLabel, { press: false });
   const colorName = (color: NoteColor) => t(`readerMisc.highlight.color.${color}` as "readerMisc.highlight.color.red");
   const styleName = (style: NoteStyle) => t(`readerMisc.highlight.style.${style}` as "readerMisc.highlight.style.highlight");
   const sampleColor = highlightColorProps(currentColor ?? (target ? undefined : preferences.color));
@@ -210,16 +228,20 @@ export function ReaderContextMenu(props: ReaderContextMenuProps) {
       {NOTE_COLOR_NAMES.map((color) => (
         <button key={color} type="button" role="menuitemradio" aria-checked={currentColor === color}
           className={`hl-swatch${currentColor === color ? " is-current" : ""}`}
-          aria-label={colorName(color)} title={colorName(color)} onClick={() => chooseColor(color)}>
+          aria-label={colorName(color)} {...tips.bind(colorName(color))}
+          onClick={() => { if (!tips.consumePress()) chooseColor(color); }}>
           <span className={`hl-dot ${highlightColorProps(color).className}`} />
         </button>
       ))}
       <button type="button" role="menuitemradio"
         aria-checked={Boolean(preferences.custom && currentColor === preferences.custom)}
         className={`hl-swatch${preferences.custom && currentColor === preferences.custom ? " is-current" : ""}`}
-        aria-label={preferences.custom ? t("readerMisc.highlight.customUse") : t("readerMisc.highlight.customSet")}
-        title={preferences.custom ? t("readerMisc.highlight.customUse") : t("readerMisc.highlight.customSet")}
-        onPointerDown={() => {
+        aria-label={customLabel}
+        onPointerEnter={customTip.onPointerEnter}
+        onFocus={customTip.onFocus}
+        onBlur={customTip.onBlur}
+        onPointerDown={(event) => {
+          customTip.onPointerDown(event);
           longPressRef.current.fired = false;
           clearTimeout(longPressRef.current.timer);
           longPressRef.current.timer = setTimeout(() => {
@@ -228,7 +250,7 @@ export function ReaderContextMenu(props: ReaderContextMenuProps) {
           }, CUSTOM_LONG_PRESS_MS);
         }}
         onPointerUp={endLongPress}
-        onPointerLeave={endLongPress}
+        onPointerLeave={(event) => { endLongPress(); customTip.onPointerLeave(event); }}
         onPointerCancel={endLongPress}
         onContextMenu={(event) => { event.preventDefault(); endLongPress(); setPicking(true); }}
         onClick={() => {
@@ -242,12 +264,18 @@ export function ReaderContextMenu(props: ReaderContextMenuProps) {
       </button>
     </div>
   );
-  const styles = NOTE_STYLES.map((style) => (
-    <button key={style} type="button" role="menuitemradio" aria-checked={currentStyle === style}
-      className={currentStyle === style ? "is-on" : undefined} onClick={() => chooseStyle(style)}>
-      <span className={`hl-style-sample hl-s-${style} ${sampleColor.className}`} style={sampleColor.style}>{styleName(style)}</span>
-    </button>
-  ));
+  // A letter wearing the style, in the current color: the same in every language.
+  const styles = (
+    <div className="hl-menu-row" role="group" aria-label={t("readerMisc.highlight.styles")}>
+      {NOTE_STYLES.map((style) => (
+        <button key={style} type="button" role="menuitemradio" aria-checked={currentStyle === style}
+          className={`sm-btn${currentStyle === style ? " is-on" : ""}`} aria-label={styleName(style)}
+          {...tips.bind(styleName(style))} onClick={() => { if (!tips.consumePress()) chooseStyle(style); }}>
+          <span className={`hl-style-sample hl-s-${style} ${sampleColor.className}`} style={sampleColor.style} aria-hidden="true">A</span>
+        </button>
+      ))}
+    </div>
+  );
 
   let body: ReactNode;
   if (picking) {
@@ -257,19 +285,19 @@ export function ReaderContextMenu(props: ReaderContextMenuProps) {
       <>
         {swatches}
         <div className="hl-menu-rule" />
-        <div className="hl-menu-row">{styles}</div>
-        <div className="hl-menu-rule" />
-        <div className="hl-menu-row">
-          <button type="button" role="menuitem" onClick={() => { props.onClose(); highlight.onEditNote(target); }}>
-            {target.content ? t("readerMisc.highlight.editNote") : t("readerMisc.addNote")}
-          </button>
-          {copyButton}
-          {copyOriginal}
-          {shareButton(target)}
-          <span className="hl-menu-sep" />
-          <button type="button" role="menuitem" className="is-danger" onClick={() => { props.onClose(); highlight.onDelete(target); }}>
-            {t("readerMisc.highlight.delete")}
-          </button>
+        <div className="sm-tools">
+          {styles}
+          <span className="sm-divider" />
+          <div className="hl-menu-row sm-actions">
+            {action(target.content ? t("readerMisc.highlight.editNote") : t("readerMisc.addNote"), <NoteIcon />,
+              () => { props.onClose(); highlight.onEditNote(target); })}
+            {copyButton}
+            {copyOriginal}
+            {shareButton(target)}
+            <span className="hl-menu-sep" />
+            {action(t("readerMisc.highlight.delete"), <TrashIcon size={20} />,
+              () => { props.onClose(); highlight.onDelete(target); }, "is-danger")}
+          </div>
         </div>
       </>
     );
@@ -278,13 +306,15 @@ export function ReaderContextMenu(props: ReaderContextMenuProps) {
       <>
         {swatches}
         <div className="hl-menu-rule" />
-        <div className="hl-menu-row">
+        <div className="sm-tools">
           {styles}
-          <span className="hl-menu-sep" />
-          {addNote}
-          {copyButton}
-          {copyOriginal}
-          {shareButton(null)}
+          <span className="sm-divider" />
+          <div className="hl-menu-row sm-actions">
+            {addNote}
+            {copyButton}
+            {copyOriginal}
+            {shareButton(null)}
+          </div>
         </div>
       </>
     );
@@ -292,13 +322,16 @@ export function ReaderContextMenu(props: ReaderContextMenuProps) {
     const prefColor = highlightColorProps(preferences.color);
     body = (
       <div className="hl-menu-row">
-        <button type="button" role="menuitem" onClick={() => highlight.onHighlight(preferences.style, preferences.color)}>
-          <span className={`hl-dot ${prefColor.className}`} style={prefColor.style} />
-          {t("readerMisc.highlight.apply")}
+        <button type="button" role="menuitem" className={`sm-btn ${prefColor.className}`} style={prefColor.style}
+          aria-label={t("readerMisc.highlight.apply")} {...tips.bind(t("readerMisc.highlight.apply"))}
+          onClick={() => { if (!tips.consumePress()) highlight.onHighlight(preferences.style, preferences.color); }}>
+          <HighlighterIcon />
         </button>
-        <button type="button" className="hl-menu-chevron" aria-expanded={false}
-          aria-label={t("readerMisc.highlight.expand")} title={t("readerMisc.highlight.expand")}
-          onClick={() => setExpanded(true)}>▾</button>
+        <button type="button" className="sm-btn hl-menu-chevron" aria-expanded={false}
+          aria-label={t("readerMisc.highlight.expand")} {...tips.bind(t("readerMisc.highlight.expand"))}
+          onClick={() => { if (!tips.consumePress()) setExpanded(true); }}>
+          <ChevronDownIcon size={16} />
+        </button>
         <span className="hl-menu-sep" />
         {addNote}
         {copyButton}
@@ -318,6 +351,7 @@ export function ReaderContextMenu(props: ReaderContextMenuProps) {
       onPointerDown={handlePointerDown}
     >
       {body}
+      {picking ? null : bubble}
     </div>
   );
 }
