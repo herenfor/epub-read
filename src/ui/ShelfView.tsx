@@ -302,6 +302,8 @@ export interface ShelfViewProps {
   onImportLegacyArchive?(): void;
   /** ER-0138: single-book KOReader progress import; absent hides the row. */
   onImportKoreader?(): void;
+  /** Readest import (books and reading data); absent hides the row. */
+  onImportReadest?(): void;
   onDelete(id: string): void;
   /** 批量删除（选中多本时由确认弹窗调用） */
   onDeleteMany(ids: string[]): void;
@@ -1962,6 +1964,7 @@ export function ShelfView(props: ShelfViewProps) {
     onExportAllBooks: props.onExportBooks ? () => props.onExportBooks!() : undefined,
     onImportLegacyArchive: props.onImportLegacyArchive,
     onImportKoreader: props.onImportKoreader,
+    onImportReadest: props.onImportReadest,
     onLibraryLocationChanged: props.onLibraryLocationChanged,
     bodySearch,
     onOpenDiagnostics: props.onOpenDiagnostics ? () => {

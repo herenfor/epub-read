@@ -408,3 +408,133 @@ fn readest_dto_rejects_foreign_clock_and_null_progress() {
     value["stamp"] = json!({"deviceId":ID,"counter":9000});
     assert!(serde_json::from_value::<ReadestBookImport>(value).is_err());
 }
+
+fn readest_folder(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("selis-readest-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+#[test]
+fn readest_backup_lists_book_files_and_stages_one_without_touching_others() {
+    let other = "cccccccccccccccccccccccccccccccc";
+    let book = (0..700_000).map(|i| (i % 253) as u8).collect::<Vec<_>>();
+    let session = active();
+    let zip = archive(&[
+        ("library.json", b"[]"),
+        (&format!("{REMOTE}/config.json"), b"{}"),
+        (&format!("{REMOTE}/cover.png"), b"png"),
+        (&format!("{REMOTE}/nav.json"), b"{}"),
+        (&format!("{REMOTE}/Synthetic Book.epub"), &book),
+        (&format!("{REMOTE}/audiobook/part.epub"), b"nested"),
+        (&format!("{other}/Scan.pdf"), b"pdf"),
+        ("settings.json", b"{}"),
+    ]);
+    catalog(&session, zip).unwrap();
+    let (found, origin) = {
+        let data = session.data.lock().unwrap();
+        (data.books.clone(), data.archive.clone().unwrap())
+    };
+    // Only the supported book beside a config counts: no sidecar, audiobook or PDF.
+    assert_eq!(found.keys().collect::<Vec<_>>(), [REMOTE]);
+    let file = &found[REMOTE];
+    assert_eq!((file.name.as_str(), file.bytes), ("Synthetic Book.epub", book.len() as u64));
+    let (Origin::Zip(zip), BookAt::Zip(index)) = (origin, file.at.clone()) else {
+        panic!("a backup book must come from the archive");
+    };
+    let dir = readest_folder("stage");
+    let dest = dir.join("1").join(super::books::safe_name(&file.name));
+    let mut seen = 0;
+    super::books::extract(&zip, index, file.bytes, &dest, &|| Ok(()), &mut |step| seen += step).unwrap();
+    assert_eq!(std::fs::read(&dest).unwrap(), book);
+    assert_eq!(seen, book.len() as u64);
+    // A cancelled extraction leaves no partial file behind.
+    let partial = dir.join("2").join("book.epub");
+    let calls = std::cell::Cell::new(0);
+    let cancelled = super::books::extract(&zip, index, file.bytes, &partial, &|| {
+        calls.set(calls.get() + 1);
+        if calls.get() > 1 { Err(super::error("cancelled", "x")) } else { Ok(()) }
+    }, &mut |_| {});
+    assert_eq!(cancelled.unwrap_err().code, "cancelled");
+    assert!(!partial.exists());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn readest_staged_names_are_plain_and_portable() {
+    use super::books::safe_name;
+    assert_eq!(safe_name("三体：黑暗森林?.epub"), "三体：黑暗森林_.epub");
+    assert_eq!(safe_name("a/b\\What: a \"test\".mobi"), "What_ a _test_.mobi");
+    assert_eq!(safe_name("..epub"), "book.epub");
+    assert_eq!(safe_name(".azw3"), "book.azw3");
+    assert_eq!(safe_name(&format!("{}.epub", "长".repeat(200))).len(), 180 + ".epub".len());
+}
+
+#[test]
+fn readest_library_folder_is_found_at_any_level_and_read_like_a_backup() {
+    let root = readest_folder("folder");
+    let books = root.join("Readest").join("Books");
+    let own = books.join(REMOTE);
+    std::fs::create_dir_all(&own).unwrap();
+    std::fs::create_dir_all(books.join("not-a-hash")).unwrap();
+    std::fs::write(books.join("library.json"), b"[]").unwrap();
+    std::fs::write(own.join("config.json"), b"{\"v\":1}").unwrap();
+    std::fs::write(own.join("cover.png"), b"png").unwrap();
+    std::fs::write(own.join("Book.epub"), b"epub-bytes").unwrap();
+    std::fs::write(root.join("Readest").join("settings.json"), b"{\"secret\":1}").unwrap();
+    for picked in [root.clone(), root.join("Readest"), books.clone()] {
+        assert_eq!(super::folder::locate(&picked), Some(books.clone()));
+    }
+    assert_eq!(super::folder::locate(&own), None);
+    assert_eq!(
+        super::folder::default_roots(Some("/data".into()), Some("/home/u".into())),
+        [
+            std::path::PathBuf::from("/data/com.bilingify.readest"),
+            std::path::PathBuf::from("/home/u/.var/app/com.bilingify.readest/data/com.bilingify.readest"),
+        ]
+    );
+
+    let session = active();
+    let library = super::commands::catalog_folder(&session, &books).unwrap();
+    assert_eq!(session.read_json(library.entry_index, 0).unwrap(), b"[]");
+    {
+        let data = session.data.lock().unwrap();
+        assert_eq!(data.books.keys().collect::<Vec<_>>(), [REMOTE]);
+        assert!(matches!(&data.books[REMOTE].at, BookAt::File(path) if path == &own.join("Book.epub")));
+        // Settings are outside the catalogue and can never be requested.
+        assert_eq!(data.entries.len(), 2);
+    }
+    // Readest rewrote the config after the scan: the lookup serves the new bytes whole.
+    std::fs::write(own.join("config.json"), b"{\"v\":2,\"more\":true}").unwrap();
+    let config = session.config_entry(REMOTE).unwrap().unwrap();
+    assert_eq!(config.bytes, 19);
+    assert_eq!(session.read_json(config.entry_index, 0).unwrap(), b"{\"v\":2,\"more\":true}");
+    assert!(session.data.lock().unwrap().configs_read.contains(REMOTE));
+    // A change between the lookup and a fresh read is reported, never mixed.
+    std::fs::write(own.join("config.json"), b"{}").unwrap();
+    assert_eq!(session.read_json(config.entry_index, 0).unwrap_err().code, "source-changed");
+    assert_eq!(session.read_json(99, 0).unwrap_err().code, "invalid-request");
+    assert!(session.config_entry("dddddddddddddddddddddddddddddddd").unwrap().is_none());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn readest_session_commits_in_batches_until_cancelled() {
+    let mut store = store();
+    let session = active();
+    for offset in [1, 2] {
+        let target = store.readest_target(HASH).unwrap();
+        store
+            .import_readest(&[(target, plan(offset))], 100 + offset, &|| false, |tx| {
+                session.finish(tx, &|| true, &[])
+            })
+            .unwrap();
+    }
+    assert_eq!(session.close().unwrap(), "committed");
+    let target = store.readest_target(HASH).unwrap();
+    let late = store.import_readest(&[(target, plan(3))], 200, &|| false, |tx| {
+        session.finish(tx, &|| true, &[])
+    });
+    assert_eq!(late.unwrap_err().code, "cancelled");
+}

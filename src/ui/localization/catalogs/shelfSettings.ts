@@ -18,6 +18,7 @@ export const shelfSettings = defineMessages("shelfSettings", {
   "shelfSettings.group.more": { zh: "更多", note: "Touch settings home: group of rows that open the sync, data, storage and about pages.", max: 12 },
   "shelfSettings.entry.lan": { zh: "互传", note: "Touch settings home, Data & Backup row: one item of its summary (device-to-device transfer).", max: 12 },
   "shelfSettings.entry.archive": { zh: "导出与导入存档", note: "Data & Backup row summary item.", max: 24 },
+  "shelfSettings.entry.readest": { zh: "Readest", note: "Data & Backup row summary item (Readest import).", max: 12 },
   "shelfSettings.entry.koreader": { zh: "KOReader", note: "Data & Backup row summary item (KOReader progress import).", max: 12 },
   "shelfSettings.entry.library": { zh: "书库", note: "Storage row summary item (library folder).", max: 12 },
   "shelfSettings.entry.watch": { zh: "自动导入", note: "Storage row summary item (auto-import folder).", max: 12 },

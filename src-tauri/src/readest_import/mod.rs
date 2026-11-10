@@ -1,10 +1,14 @@
-//! Read-only Readest backup sessions and confirmed local record migration.
-//! No source books, settings, external clocks or foreign tombstones are imported.
+//! Read-only Readest sessions (backup ZIP or Readest's library folder) and
+//! confirmed local record migration. Book files are only handed to the normal
+//! import pipeline; no settings, external clocks or foreign tombstones are imported.
+mod books;
 mod commands;
+mod folder;
 pub(crate) mod source;
 mod state;
 
 use crate::portable_state::{PortableError, PortableResult};
+pub(crate) use books::*;
 pub(crate) use commands::*;
 pub(crate) use state::{ImportScope, ReadestImportState};
 

@@ -937,7 +937,10 @@ export default function App() {
     isTauriEnv, setShelfNotice, refreshShelfProjection,
   });
 
-  const readestImport = useReadestImport({ shelfEntriesRef, refreshShelfProjection, setShelfNotice });
+  const readestImport = useReadestImport({
+    shelfEntriesRef, refreshShelfProjection, setShelfNotice,
+    platform: runtime.platform, importSlotRef: nativeImportRef, shelfBusyRef,
+  });
   const pickKoreader = useCallback(() => pickKoreaderSidecar(runtime.platform), [runtime.platform]);
   // The same save barrier as moving a book: flush its progress lane, refuse a pending local checkpoint.
   const beforeKoreaderCommit = useCallback(async ({ id, bookHash }: { id: string; bookHash: string }) => {
@@ -2711,6 +2714,7 @@ export default function App() {
                   ? undefined
                   : () => void koreaderImport.start()
               }
+              onImportReadest={runtime.platform === "web" || !isTauriEnv() ? undefined : readestImport.open}
               onImportLegacyArchive={
                 runtime.platform === "web" || !isTauriEnv() || !libraryServices
                   ? undefined
@@ -3429,10 +3433,13 @@ export default function App() {
       <ReadestImportDialog
         state={readestImport.state}
         updateRows={readestImport.updateRows}
-        updateReviews={readestImport.updateReviews}
-        onNext={() => void readestImport.next()}
+        onRule={readestImport.setRule}
+        onUseFound={() => void readestImport.startFound()}
+        onPickBackup={() => void readestImport.pickBackup()}
+        onPickFolder={() => void readestImport.pickFolder()}
         onBack={readestImport.back}
-        onCommit={() => void readestImport.commit()}
+        onRun={() => void readestImport.run()}
+        onStop={readestImport.stop}
         onCancel={readestImport.cancel}
       />
       <KoreaderImportDialog

@@ -1,9 +1,10 @@
 /**
- * Typed calls for the ER-0103 Readest backup commands (readest-import-design.md §4).
- * The native side owns the ZIP session, candidate digests and the import
- * transaction; this module only shapes arguments and reads entries to EOF.
+ * Typed calls for the Readest import commands. The native side owns the source
+ * session (a backup ZIP or Readest's library folder), candidate digests, book
+ * staging and the import transaction; this module only shapes arguments and
+ * reads entries to EOF.
  */
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import type { BookmarkValue, Locator, NoteValue, ProgressValue } from "../core/portableState/portable-state-types";
 import type { Version } from "../core/portableState/portable-register-core";
 import type { SaveFileLocation } from "./saveFileNativeBridge";
@@ -16,10 +17,41 @@ export interface ReadestJsonEntry {
   bytes: number;
 }
 
+/** The original book file Readest keeps beside a book's config. */
+export interface ReadestBookFile {
+  readestHash: string;
+  fileName: string;
+  bytes: number;
+}
+
 export interface ReadestBackupInfo {
   sessionId: string;
   chunkBytes: number;
   library: ReadestJsonEntry;
+  kind: "zip" | "folder";
+  /** Only books whose file is in the source and in a format SeLis reads. */
+  books: ReadestBookFile[];
+}
+
+export interface ReadestStageProgress {
+  completed: number;
+  total: number;
+  bytesDone: number;
+  bytesTotal: number;
+}
+
+/** One book made importable: a path on desktop, a content URI on Android. */
+export interface ReadestStagedBook {
+  readestHash: string;
+  path?: string;
+  uri?: string;
+  fileName?: string;
+  errorCode?: string;
+}
+
+export interface ReadestLibraryProbe {
+  path: string;
+  books: number;
 }
 
 /** The native portable progress projection for the local book. */
@@ -62,6 +94,7 @@ export type ReadestCloseStatus = "closed" | "committed" | "not-found";
 export const READEST_TARGET_BATCH = 128;
 export const READEST_COMMIT_MAX_BOOKS = 128;
 export const READEST_COMMIT_MAX_RECORDS = 20_000;
+export const READEST_STAGE_BATCH = 128;
 
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 const call: Invoke = (command, args) => invoke(command, args);
@@ -117,6 +150,29 @@ export function readestImportTargets(sessionId: string, bookHashes: string[], ru
 
 export function commitReadestImport(sessionId: string, books: ReadestBookImportPayload[], run: Invoke = call): Promise<ReadestImportOutcome> {
   return run("readest_import_commit", { sessionId, books });
+}
+
+/**
+ * Makes the chosen books importable. Rows carry per-book failures; a cancelled
+ * or closed session rejects the whole call.
+ */
+export function stageReadestBooks(
+  sessionId: string,
+  readestHashes: string[],
+  onProgress: (progress: ReadestStageProgress) => void,
+  run: Invoke = call,
+): Promise<ReadestStagedBook[]> {
+  return run("readest_books_stage", { sessionId, readestHashes, onProgress: new Channel<ReadestStageProgress>(onProgress) });
+}
+
+/** Drops staged copies once the importer has taken them. */
+export function releaseReadestBooks(sessionId: string, run: Invoke = call): Promise<void> {
+  return run("readest_books_release", { sessionId });
+}
+
+/** Desktop only: Readest's library in its default data location, if any. */
+export function probeReadestLibrary(run: Invoke = call): Promise<ReadestLibraryProbe | null> {
+  return run("readest_library_probe");
 }
 
 export async function closeReadestBackup(sessionId: string, run: Invoke = call): Promise<ReadestCloseStatus> {

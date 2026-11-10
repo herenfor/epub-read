@@ -1,62 +1,94 @@
 import { describe, expect, it } from "vitest";
-import type { BookmarkValue, NoteValue } from "../../core/portableState/portable-state-types";
-import type { ImportCandidate } from "./readestConvert";
-import { bookReview, commitPlan, localImportBooks, matchRows, type LocalImportBook } from "./readestImportModel";
+import type { BookmarkValue, NoteValue, ProgressValue } from "../../core/portableState/portable-state-types";
+import type { ImportCandidate, ReadestBookPreview } from "./readestConvert";
+import { bookPayload, importRows, localImportBooks, selectionSummary, stageChunks, takesReadestPosition, type LocalImportBook } from "./readestImportModel";
 import type { ReadestLibraryBook } from "./readestBackup";
 
-const md5 = (c: string) => c.repeat(32);
-const book = (hash: string, extra: Partial<ReadestLibraryBook> = {}): ReadestLibraryBook =>
-  ({ hash, format: "EPUB", title: `R${hash[0]}`, author: "", originalFilename: null, deleted: false, ...extra });
-const local = (id: string, digest: string, progressPct: number | null = null): LocalImportBook =>
-  ({ id, bookHash: id.repeat(64), title: `L${id}`, fileName: `${id}.epub`, partialMd5: digest, targetToken: `t-${id}`, progressPct });
-const candidate = <T>(grade: ImportCandidate<T>["grade"], value: T | null, key = "k"): ImportCandidate<T> =>
-  ({ sourceKey: `readest:${md5("a")}:${key}`, grade, reasons: [], value, source: { cfi: "epubcfi(/6/2!/4)", text: "原文" } });
+const hash = (c: string) => c.repeat(32);
+const book = (c: string, format = "EPUB", deleted = false): ReadestLibraryBook =>
+  ({ hash: hash(c), format, title: `Book ${c}`, author: "", originalFilename: null, deleted });
+const local = (id: string, digest: string, fileName = `${id}.epub`, progressPct: number | null = null): LocalImportBook =>
+  ({ id, bookHash: id.repeat(64).slice(0, 64), title: id, fileName, partialMd5: hash(digest), targetToken: `t-${id}`, progressPct });
+const candidate = <T,>(key: string, grade: ImportCandidate<T>["grade"], value: T | null): ImportCandidate<T> =>
+  ({ sourceKey: key, grade, reasons: [], value, source: { cfi: "", text: `text of ${key}` } });
+const locator = { locatorVersion: 1, chapterPath: "c.xhtml", spineIndexHint: 0, target: { kind: "chapter-start" } };
+const progress = (pct: number) => candidate<ProgressValue>("p", "exact", { locator, progressPctHint: pct } as unknown as ProgressValue);
 
 describe("Readest import model", () => {
-  it("auto-chooses only a unique digest match and keeps failed local rows out", () => {
-    const locals = localImportBooks(
-      [{ id: "x", contentHash: "x".repeat(64), title: "X", fileName: "x.epub" }, { id: "y", contentHash: "y".repeat(64), title: "Y", fileName: "y.epub" }],
+  it("keeps only shelf books the native side could sample", () => {
+    const books = localImportBooks(
+      [{ id: "a", contentHash: "ha", title: "A", fileName: "a.epub" }, { id: "b", contentHash: "hb", title: "B", fileName: "b.epub" }],
       [
-        { bookHash: "x".repeat(64), partialMd5: md5("a"), targetToken: "tx", progress: { versions: [], display: null, conflict: false } },
-        { bookHash: "y".repeat(64), errorCode: "source-unavailable" },
+        { bookHash: "ha", partialMd5: hash("1"), targetToken: "t", progress: { versions: [], display: { value: { progressPctHint: 40 } } as never, conflict: false } },
+        { bookHash: "hb", errorCode: "source-unavailable" },
       ],
     );
-    expect(locals.map((b) => [b.id, b.progressPct])).toEqual([["x", null]]);
-    const rows = matchRows(
-      [book(md5("b")), book(md5("a")), book(md5("c")), book(md5("d"), { format: "PDF" }), book(md5("e"), { deleted: true })],
-      [...locals, local("p", md5("c")), local("q", md5("c"))],
-    );
-    expect(rows.map((r) => [r.readestHash[0], r.status, r.chosen, r.selected])).toEqual([
-      ["a", "matched", "x", true],
-      ["c", "ambiguous", null, false],
-      ["b", "unmatched", null, false],
-      ["d", "unsupported-format", null, false],
-      ["e", "deleted", null, false],
-    ]);
+    expect(books).toEqual([expect.objectContaining({ id: "a", progressPct: 40 })]);
   });
 
-  it("commits only ticked, placed values, keeps a local position unless asked, and enforces limits", () => {
-    const row = matchRows([book(md5("a"))], [local("x", md5("a"), 52)])[0];
-    const locator = { locatorVersion: 1, chapterPath: "c.xhtml", spineIndexHint: 0, target: { kind: "chapter-start" } } as const;
-    const review = bookReview(row, local("x", md5("a"), 52), {
-      progress: candidate("exact", { locator, progressPctHint: 41 }, "progress"),
-      bookmarks: [candidate("exact", { locator, text: "书签", createdAtMs: 1 }, "b1"), candidate<BookmarkValue>("unresolved", null, "b2")],
-      notes: [candidate<NoteValue>("unsupported", null, "n1")],
+  it("sorts every Readest book into new, already here, or not importable with a reason", () => {
+    const rows = importRows(
+      [book("1"), book("2"), book("3", "PDF"), book("4"), book("5", "EPUB", true), book("6", "MOBI"), book("7", "MOBI")],
+      [local("x", "2"), local("y", "7", "y.mobi")],
+      [
+        { readestHash: hash("1"), fileName: "One.epub", bytes: 10 },
+        { readestHash: hash("2"), fileName: "Two.epub", bytes: 20 },
+        { readestHash: hash("6"), fileName: "Six.mobi", bytes: 30 },
+      ],
+    );
+    // A deleted Readest book is not offered at all.
+    expect(rows.map((row) => [row.readestHash[0], row.kind, row.reason ?? null, row.records, row.selected])).toEqual([
+      ["1", "new", null, true, true],
+      // Other formats come over as books; their records cannot be converted.
+      ["6", "new", null, false, true],
+      // The same file is already on the shelf: its copy in the source is not imported again.
+      ["2", "existing", null, true, true],
+      ["3", "unavailable", "unsupported-format", false, false],
+      ["4", "unavailable", "no-file", false, false],
+      ["7", "unavailable", "shelved-no-records", false, false],
+    ]);
+    expect(rows[2].local?.id).toBe("x");
+    expect(selectionSummary(rows)).toEqual({ newBooks: 2, existing: 1, bytes: 40 });
+  });
+
+  it("stages new books in bounded chunks and never drops an oversized one", () => {
+    const rows = importRows(
+      ["1", "2", "3", "4"].map((c) => book(c)), [],
+      ["1", "2", "3", "4"].map((c, index) => ({ readestHash: hash(c), fileName: `${c}.epub`, bytes: index === 2 ? 500 : 100 })),
+    );
+    expect(stageChunks(rows, 8, 250).map((chunk) => chunk.map((row) => row.readestHash[0]))).toEqual([["1", "2"], ["3"], ["4"]]);
+    expect(stageChunks(rows, 3, 10_000).map((chunk) => chunk.length)).toEqual([3, 1]);
+  });
+
+  it("applies the reading-position rule only when both sides have a position", () => {
+    expect(takesReadestPosition("local", 5, null)).toBe(true);
+    expect(takesReadestPosition("local", 90, 10)).toBe(false);
+    expect(takesReadestPosition("readest", 5, 90)).toBe(true);
+    expect(takesReadestPosition("farther", 50, 40)).toBe(true);
+    expect(takesReadestPosition("farther", 40, 40)).toBe(false);
+  });
+
+  it("sends everything that was placed and lists what was not", () => {
+    const preview: ReadestBookPreview = {
+      progress: progress(30),
+      bookmarks: [candidate<BookmarkValue>("b1", "exact", { text: "b" } as BookmarkValue), candidate<BookmarkValue>("b2", "unresolved", null)],
+      notes: [candidate<NoteValue>("n1", "approximate", { content: "n" } as NoteValue), candidate<NoteValue>("n2", "unsupported", null)],
+    };
+    const ahead = bookPayload(hash("1"), "Book", local("x", "1", "x.epub", 60), preview, "farther");
+    expect(ahead.payload).toMatchObject({ readestHash: hash("1"), targetToken: "t-x", bookmarks: [{ sourceKey: "b1" }], notes: [{ sourceKey: "n1" }] });
+    // The local position is further along, so Readest's is not sent.
+    expect(ahead.payload).not.toHaveProperty("progress");
+    expect(ahead.records).toBe(2);
+    expect(ahead.unplaced).toEqual([
+      { title: "Book", kind: "bookmark", text: "text of b2" },
+      { title: "Book", kind: "note", text: "text of n2" },
+    ]);
+    const taken = bookPayload(hash("1"), "Book", local("x", "1", "x.epub", 60), preview, "readest");
+    expect(taken.payload?.progress).toEqual({ locator, progressPctHint: 30 });
+
+    const lost: ReadestBookPreview = { progress: candidate<ProgressValue>("p", "unresolved", null), bookmarks: [], notes: [] };
+    expect(bookPayload(hash("1"), "Book", local("x", "1"), lost, "farther")).toEqual({
+      payload: null, records: 0, unplaced: [{ title: "Book", kind: "progress", text: null }],
     });
-    expect(review.progress?.selected).toBe(false);
-    const plan = commitPlan([review]);
-    expect(plan).toEqual({
-      ok: true,
-      records: 1,
-      notChosen: 3,
-      books: [{ bookHash: "x".repeat(64), readestHash: md5("a"), targetToken: "t-x", bookmarks: [{ sourceKey: `readest:${md5("a")}:b1`, value: { locator, text: "书签", createdAtMs: 1 } }], notes: [] }],
-    });
-    // No "progress" key at all when the local position is kept (null is rejected natively).
-    expect(plan.ok && "progress" in plan.books[0]).toBe(false);
-    const withProgress = commitPlan([{ ...review, progress: { ...review.progress!, selected: true } }]);
-    expect(withProgress.ok && withProgress.books[0].progress).toEqual({ locator, progressPctHint: 41 });
-    expect(commitPlan([{ ...review, selected: false }])).toEqual({ ok: false, reason: "nothing-selected", records: 0 });
-    const many = Array.from({ length: 129 }, (_, i) => ({ ...review, readestHash: String(i) }));
-    expect(commitPlan(many)).toMatchObject({ ok: false, reason: "too-many-books" });
   });
 });

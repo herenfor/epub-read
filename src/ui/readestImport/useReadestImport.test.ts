@@ -4,17 +4,24 @@ import { createReactDomHarness } from "../../test/reactDomHarness";
 import type { ShelfEntry } from "../shelf";
 import { useReadestImport } from "./useReadestImport";
 
+const REMOTE = "b".repeat(32);
+const NEW = "c".repeat(32);
 const ports = vi.hoisted(() => ({
-  open: vi.fn(), close: vi.fn(), read: vi.fn(), targets: vi.fn(), config: vi.fn(),
-  commit: vi.fn(), convert: vi.fn(), target: vi.fn(), notice: vi.fn(), refresh: vi.fn(), dirty: vi.fn(),
+  open: vi.fn(), close: vi.fn(), read: vi.fn(), targets: vi.fn(), config: vi.fn(), commit: vi.fn(),
+  stage: vi.fn(), release: vi.fn(), probe: vi.fn(), pick: vi.fn(),
+  convert: vi.fn(), target: vi.fn(), notice: vi.fn(), refresh: vi.fn(), dirty: vi.fn(),
+  importPaths: vi.fn(), library: [] as unknown[],
   shelfChanged: null as null | (() => void),
 }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: ports.pick }));
 vi.mock("../../platform/readestImportNativeBridge", () => ({
   openReadestBackup: ports.open, closeReadestBackup: ports.close, readReadestEntryText: ports.read,
   readestImportTargets: ports.targets, findReadestConfig: ports.config, commitReadestImport: ports.commit,
+  stageReadestBooks: ports.stage, releaseReadestBooks: ports.release, probeReadestLibrary: ports.probe,
   READEST_TARGET_BATCH: 128, READEST_COMMIT_MAX_BOOKS: 128, READEST_COMMIT_MAX_RECORDS: 20000,
 }));
-vi.mock("../shelf", () => ({ getShelfStore: () => ({}) }));
+vi.mock("../../platform/androidNativeBridge", () => ({ importDocuments: vi.fn() }));
+vi.mock("../shelf", () => ({ getShelfStore: () => ({ importPaths: ports.importPaths }) }));
 vi.mock("../shelfSpaces", () => ({
   activeShelfSpace: () => ({ kind: "public" }),
   subscribeShelfSpace: (listener: () => void) => { ports.shelfChanged = listener; return () => { ports.shelfChanged = null; }; },
@@ -22,8 +29,8 @@ vi.mock("../shelfSpaces", () => ({
 vi.mock("../cloudSync/cloudSyncStore", () => ({ noteCloudSyncChange: ports.dirty }));
 vi.mock("../localization/UiLanguageProvider", () => ({ uiText: (key: string) => key }));
 vi.mock("./readestBackup", () => ({
-  parseReadestLibrary: () => ({ ok: true, value: { books: [{ hash: "b".repeat(32), format: "EPUB", title: "Book", author: "", deleted: false }] } }),
-  parseReadestBookConfig: () => ({ ok: true, value: {} }),
+  parseReadestLibrary: () => ({ ok: true, value: { books: ports.library } }),
+  parseReadestBookConfig: () => ({ ok: true, value: { skipped: [] } }),
 }));
 vi.mock("./readestLocalTarget", () => ({ openReadestTarget: ports.target }));
 vi.mock("./readestConvert", () => ({ convertReadestBook: ports.convert }));
@@ -35,29 +42,140 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 const outcome = { importedBooks: 1, bookmarksAdded: 1, notesAdded: 0, progressWritten: 0, skippedExisting: 0, progressUnchanged: 0 };
+const readestBook = (hash: string, title: string) => ({ hash, format: "EPUB", title, author: "", deleted: false });
+const localTarget = (bookHash: string, partialMd5: string) =>
+  ({ bookHash, partialMd5, targetToken: `token-${bookHash[0]}`, progress: { versions: [], display: null, conflict: false } });
+const newEntry = { id: "new", contentHash: "d".repeat(64), title: "New", fileName: "New.epub" } as ShelfEntry;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  ports.open.mockImplementation(async ({ sessionId }) => ({ sessionId, library: { entryIndex: 0, bytes: 2 } }));
-  ports.close.mockResolvedValue("closed"); ports.read.mockResolvedValue("{}");
+  ports.library = [readestBook(REMOTE, "Shelved"), readestBook(NEW, "New")];
+  ports.open.mockImplementation(async ({ sessionId }) => ({
+    sessionId, library: { entryIndex: 0, bytes: 2 }, kind: "zip", books: [{ readestHash: NEW, fileName: "New.epub", bytes: 2048 }],
+  }));
+  ports.close.mockResolvedValue("closed"); ports.read.mockResolvedValue("{}"); ports.release.mockResolvedValue(undefined);
+  ports.probe.mockResolvedValue(null);
   ports.config.mockResolvedValue({ entryIndex: 1, bytes: 2 });
-  ports.targets.mockResolvedValue([{ bookHash: "a".repeat(64), partialMd5: "b".repeat(32), targetToken: "token", progress: { versions: [], display: null, conflict: false } }]);
+  ports.targets.mockImplementation(async (_id: string, hashes: string[]) => hashes.map((bookHash) =>
+    localTarget(bookHash, bookHash === newEntry.contentHash ? NEW : REMOTE)));
   ports.target.mockResolvedValue({ target: {}, close: vi.fn() });
-  ports.convert.mockResolvedValue({ progress: null, notes: [], bookmarks: [{ sourceKey: `readest:${"b".repeat(32)}:bookmark`, grade: "exact", reasons: [], source: {}, value: {
-    locator: { locatorVersion: 1, chapterPath: "c.xhtml", spineIndexHint: 0, target: { kind: "chapter-start" } }, text: "bookmark", createdAtMs: 1,
-  } }] });
+  ports.convert.mockImplementation(async (readestHash: string) => ({ progress: null, notes: [], bookmarks: [{
+    sourceKey: `readest:${readestHash}:bookmark`, grade: "exact", reasons: [], source: { cfi: "", text: null }, value: {
+      locator: { locatorVersion: 1, chapterPath: "c.xhtml", spineIndexHint: 0, target: { kind: "chapter-start" } }, text: "bookmark", createdAtMs: 1,
+    } }] }));
+  ports.stage.mockResolvedValue([{ readestHash: NEW, path: "/cache/1/New.epub", fileName: "New.epub" }]);
+  ports.importPaths.mockResolvedValue({ results: [{ inputIndex: 0, status: "saved", contentHash: newEntry.contentHash, record: newEntry }] });
   ports.commit.mockResolvedValue(outcome); ports.refresh.mockResolvedValue(undefined);
 });
 
-async function setup(withLocalBook = false) {
+async function setup(options: { withLocalBook?: boolean; platform?: string } = {}) {
   const dom = createReactDomHarness();
   let current!: ReturnType<typeof useReadestImport>;
-  const shelfEntriesRef = { current: withLocalBook ? [{ id: "local", contentHash: "a".repeat(64), title: "Book", fileName: "book.epub" } as ShelfEntry] : [] };
-  function Host() { current = useReadestImport({ shelfEntriesRef, refreshShelfProjection: ports.refresh, setShelfNotice: ports.notice }); return null; }
+  const shelfEntriesRef = { current: options.withLocalBook ? [{ id: "local", contentHash: "a".repeat(64), title: "Shelved", fileName: "book.epub" } as ShelfEntry] : [] };
+  const importSlotRef = { current: null as string | null };
+  const shelfBusyRef = { current: false };
+  function Host() {
+    current = useReadestImport({
+      shelfEntriesRef, refreshShelfProjection: ports.refresh, setShelfNotice: ports.notice,
+      platform: options.platform ?? "windows", importSlotRef, shelfBusyRef,
+    });
+    return null;
+  }
   await dom.render(createElement(Host));
   const start = (name: string) => current.tryStart({ kind: "path", path: `/${name}` }, name);
-  return { dom, current: () => current, start };
+  return { dom, current: () => current, start, importSlotRef };
 }
+
+describe("Readest import flow", () => {
+  it("offers the Readest library found on this computer and opens it as a folder source", async () => {
+    ports.probe.mockResolvedValue({ path: "/data/Readest/Books", books: 2 });
+    const t = await setup();
+    try {
+      await t.dom.run(async () => { t.current().open(); });
+      expect(t.current().state).toMatchObject({ kind: "source", probe: { books: 2 }, canPickFolder: true });
+      await t.dom.run(async () => { await t.current().startFound(); });
+      expect(ports.open.mock.calls[0][0].source).toEqual({ kind: "path", path: "/data/Readest/Books" });
+      expect(t.current().state.kind).toBe("list");
+    } finally { await t.dom.dispose(); }
+  });
+
+  it("takes only a backup file on Android and shows a wrong pick on the source screen", async () => {
+    const t = await setup({ platform: "android" });
+    ports.pick.mockResolvedValue("content://docs/document/primary%3ADownload%2Fnotes.zip");
+    ports.open.mockRejectedValueOnce({ code: "not-readest" });
+    try {
+      await t.dom.run(async () => { t.current().open(); });
+      expect(ports.probe).not.toHaveBeenCalled();
+      expect(t.current().state).toMatchObject({ kind: "source", probe: null, canPickFolder: false });
+      await t.dom.run(async () => { await t.current().pickBackup(); });
+      expect(ports.open.mock.calls[0][0].source).toEqual({ kind: "uri", uri: "content://docs/document/primary%3ADownload%2Fnotes.zip" });
+      expect(t.current().state).toMatchObject({ kind: "source", error: "readestImport.error.notReadest" });
+      expect(ports.close).toHaveBeenCalledTimes(1);
+    } finally { await t.dom.dispose(); }
+  });
+
+  it("merges records for a shelved book, adds a new book with its records, and reports the result", async () => {
+    const t = await setup({ withLocalBook: true });
+    try {
+      await t.dom.run(async () => { await t.start("backup.zip"); });
+      const listed = t.current().state;
+      expect(listed.kind === "list" && listed.rows.map((row) => [row.title, row.kind])).toEqual([["New", "new"], ["Shelved", "existing"]]);
+      await t.dom.run(async () => { await t.current().run(); });
+      // The staged file goes through the normal path importer, always as a library copy.
+      expect(ports.stage.mock.calls[0].slice(0, 2)).toEqual([ports.open.mock.calls[0][0].sessionId, [NEW]]);
+      expect(ports.importPaths).toHaveBeenCalledWith(["/cache/1/New.epub"], true);
+      expect(ports.release).toHaveBeenCalledTimes(1);
+      // Records of the shelved book first, then those of the book just added.
+      expect(ports.commit.mock.calls.map(([, books]) => books.map((book: { bookHash: string; readestHash: string }) => [book.bookHash[0], book.readestHash[0]])))
+        .toEqual([[["a", "b"]], [["d", "c"]]]);
+      expect(t.current().state).toMatchObject({ kind: "done", result: { booksAdded: 1, bookmarksAdded: 2, failed: [], stopped: false, notReached: 0, error: null } });
+      expect(t.importSlotRef.current).toBeNull();
+      expect(ports.refresh).toHaveBeenCalledTimes(1);
+      expect(ports.dirty).toHaveBeenCalledWith("data-changed");
+      expect(ports.close).toHaveBeenCalledTimes(1);
+    } finally { await t.dom.dispose(); }
+  });
+
+  it("stops by cutting extraction short and leaves the unreached book untouched", async () => {
+    const t = await setup({ withLocalBook: true }); const staging = deferred<never>();
+    ports.stage.mockReturnValueOnce(staging.promise);
+    let pending!: Promise<void>;
+    try {
+      await t.dom.run(async () => { await t.start("backup.zip"); });
+      await t.dom.run(async () => { pending = t.current().run(); await Promise.resolve(); });
+      await t.dom.run(async () => { await vi.waitFor(() => expect(ports.stage).toHaveBeenCalled()); });
+      await t.dom.run(() => t.current().stop());
+      expect(ports.close).toHaveBeenCalledTimes(1);
+      await t.dom.run(async () => { staging.reject({ code: "cancelled" }); await pending; });
+      expect(ports.importPaths).not.toHaveBeenCalled();
+      // The shelved book's records were already committed; that is reported, not undone.
+      expect(t.current().state).toMatchObject({ kind: "done", result: { stopped: true, notReached: 1, booksAdded: 0, bookmarksAdded: 1, error: null } });
+    } finally { await t.dom.dispose(); }
+  });
+
+  it("keeps going when one book cannot be added and names it in the result", async () => {
+    const t = await setup({ withLocalBook: true });
+    ports.stage.mockResolvedValueOnce([{ readestHash: NEW, errorCode: "storage-error" }]);
+    try {
+      await t.dom.run(async () => { await t.start("backup.zip"); });
+      await t.dom.run(async () => { await t.current().run(); });
+      expect(ports.importPaths).not.toHaveBeenCalled();
+      expect(t.current().state).toMatchObject({ kind: "done", result: { booksAdded: 0, failed: [{ title: "New", reason: "readestImport.fail.storage" }], error: null } });
+    } finally { await t.dom.dispose(); }
+  });
+
+  it("refuses to start while another import holds the shelf", async () => {
+    const t = await setup({ withLocalBook: true });
+    try {
+      await t.dom.run(async () => { await t.start("backup.zip"); });
+      t.importSlotRef.current = "directory-import";
+      await t.dom.run(async () => { await t.current().run(); });
+      expect(t.current().state.kind).toBe("list");
+      expect(ports.notice).toHaveBeenCalledWith({ kind: "warn", text: "notice.import.busy" });
+      expect(t.importSlotRef.current).toBe("directory-import");
+    } finally { await t.dom.dispose(); }
+  });
+});
 
 describe("Readest import session ownership", () => {
   it("does not reopen the UI when a library read finishes after cancellation", async () => {
@@ -81,26 +199,28 @@ describe("Readest import session ownership", () => {
       let result: unknown;
       await t.dom.run(async () => { opening.reject({ code: "not-readest" }); result = await pending; });
       expect(result).toBe("handled");
-      expect(t.current().state).toMatchObject({ kind: "match", sourceLabel: "new.zip" });
+      expect(t.current().state).toMatchObject({ kind: "list", sourceLabel: "new.zip" });
     } finally { await t.dom.dispose(); }
   });
 
   it.each(["commit", "refresh"] as const)("keeps a new dialog when the old %s finishes after a shelf change", async stage => {
-    const t = await setup(true); const gate = deferred<unknown>();
+    const t = await setup({ withLocalBook: true }); const gate = deferred<unknown>();
+    ports.library = [readestBook(REMOTE, "Shelved")];
     if (stage === "commit") ports.commit.mockReturnValueOnce(gate.promise);
     else ports.refresh.mockReturnValueOnce(gate.promise);
     let pending!: Promise<void>;
     try {
       await t.dom.run(async () => { await t.start("old.zip"); });
-      await t.dom.run(async () => { await t.current().next(); });
-      await t.dom.run(() => { pending = t.current().commit(); });
+      await t.dom.run(async () => { pending = t.current().run(); await Promise.resolve(); });
+      await t.dom.run(async () => { await vi.waitFor(() => expect(stage === "commit" ? ports.commit : ports.refresh).toHaveBeenCalled()); });
       await t.dom.run(() => ports.shelfChanged!());
       await t.dom.run(async () => { await t.start("new.zip"); });
       const newId = ports.open.mock.calls.at(-1)![0].sessionId;
       await t.dom.run(async () => { gate.resolve(stage === "commit" ? outcome : undefined); await pending; });
-      expect(t.current().state).toMatchObject({ kind: "match", sourceLabel: "new.zip" });
+      expect(t.current().state).toMatchObject({ kind: "list", sourceLabel: "new.zip" });
       expect(ports.close.mock.calls.some(([id]) => id === newId)).toBe(false);
       expect(ports.dirty).toHaveBeenCalledWith("data-changed");
+      expect(t.importSlotRef.current).toBeNull();
     } finally { await t.dom.dispose(); }
   });
 });

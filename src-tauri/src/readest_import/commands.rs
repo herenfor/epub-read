@@ -35,7 +35,7 @@ pub(crate) fn scoped<T>(
         }
     }
 }
-fn session(window: &WebviewWindow, id: &str) -> PortableResult<Arc<Session>> {
+pub(super) fn session(window: &WebviewWindow, id: &str) -> PortableResult<Arc<Session>> {
     main_window(window)?;
     let session = window.state::<ReadestImportState>().get(id)?;
     session.check()?;
@@ -55,6 +55,67 @@ pub(crate) struct BackupInfo {
     session_id: String,
     chunk_bytes: usize,
     library: JsonEntry,
+    /// "zip" or "folder".
+    kind: &'static str,
+    /// Readest books whose original file is in the source.
+    books: Vec<BookFileInfo>,
+}
+
+fn book_list(session: &Session) -> PortableResult<Vec<BookFileInfo>> {
+    Ok(session
+        .data
+        .lock()
+        .map_err(|_| error("storage-error", "迁入会话锁不可用"))?
+        .books
+        .iter()
+        .map(|(hash, book)| BookFileInfo {
+            readest_hash: hash.clone(),
+            file_name: book.name.clone(),
+            bytes: book.bytes,
+        })
+        .collect())
+}
+
+/// Readest's library folder: same catalogue as a backup, read from disk.
+pub(super) fn catalog_folder(session: &Session, books_dir: &std::path::Path) -> PortableResult<JsonEntry> {
+    let scan = folder::scan(books_dir, &|| session.check())?;
+    if scan.library_bytes > LIBRARY_LIMIT {
+        return Err(error("too-large", "备份书目超出读取上限"));
+    }
+    let mut paths = std::collections::BTreeMap::new();
+    paths.insert(0, scan.library.clone());
+    {
+        let mut data = session
+            .data
+            .lock()
+            .map_err(|_| error("storage-error", "迁入会话锁不可用"))?;
+        for (offset, (hash, path, bytes)) in scan.configs.into_iter().enumerate() {
+            let descriptor = JsonEntry {
+                entry_index: offset + 1,
+                bytes,
+            };
+            paths.insert(descriptor.entry_index, path);
+            data.entries
+                .insert(descriptor.entry_index, (descriptor.clone(), Some(hash.clone())));
+            data.configs.insert(hash, descriptor);
+        }
+        data.books = scan.books.into_iter().collect();
+    }
+    // Held now, so the size reported below is exactly what gets served.
+    let held = session.hold(0, &scan.library, false)?;
+    let library = JsonEntry {
+        entry_index: 0,
+        bytes: held.len() as u64,
+    };
+    let mut data = session
+        .data
+        .lock()
+        .map_err(|_| error("storage-error", "迁入会话锁不可用"))?;
+    data.entries.insert(0, (library.clone(), None));
+    data.library = Some(library.clone());
+    session.check()?;
+    data.archive = Some(Origin::Folder(Arc::new(paths)));
+    Ok(library)
 }
 
 pub(super) fn catalog(
@@ -99,6 +160,22 @@ pub(super) fn catalog(
                     descriptor.entry_index,
                     (descriptor, config_hash.map(str::to_owned)),
                 );
+            } else if let Some((hash, file)) = entry.name.split_once('/') {
+                // `<hash>/<title>.<ext>`: the book itself. Deeper paths are audiobooks.
+                if valid_hash(hash)
+                    && !file.contains('/')
+                    && folder::book_file_name(file)
+                    && data.books.get(hash).is_none_or(|kept| file < kept.name.as_str())
+                {
+                    data.books.insert(
+                        hash.to_owned(),
+                        BookFile {
+                            name: file.to_owned(),
+                            bytes: entry.expanded_bytes,
+                            at: BookAt::Zip(entry.entry_index),
+                        },
+                    );
+                }
             }
         }
         match page.next {
@@ -114,7 +191,7 @@ pub(super) fn catalog(
         .clone()
         .ok_or_else(|| error("not-readest", "未找到 Readest 备份书目"))?;
     session.check()?;
-    data.archive = Some(archive);
+    data.archive = Some(Origin::Zip(archive));
     Ok(library)
 }
 
@@ -134,8 +211,24 @@ pub async fn readest_backup_open(
     let result = tauri::async_runtime::spawn_blocking(move || {
         scoped(&owner, &reserved.scope, |_, _| Ok(()))?;
         reserved.check()?;
-        let archive = Arc::new(source::backup(owner.app_handle(), source)?);
-        let library = catalog(&reserved, archive)?;
+        books::sweep(owner.app_handle());
+        let picked_folder = match &source {
+            SaveFileLocation::Path { path } if std::path::Path::new(path).is_dir() => {
+                Some(std::path::PathBuf::from(path))
+            }
+            _ => None,
+        };
+        let (kind, library) = match picked_folder {
+            Some(picked) => {
+                let books_dir = folder::locate(&picked)
+                    .ok_or_else(|| error("not-readest", "这个文件夹里没有 Readest 书库"))?;
+                ("folder", catalog_folder(&reserved, &books_dir)?)
+            }
+            None => (
+                "zip",
+                catalog(&reserved, Arc::new(source::backup(owner.app_handle(), source)?))?,
+            ),
+        };
         scoped(&owner, &reserved.scope, |_, current| {
             if current() {
                 Ok(())
@@ -148,6 +241,8 @@ pub async fn readest_backup_open(
             session_id: reserved.id.clone(),
             chunk_bytes: CHUNK_BYTES,
             library,
+            kind,
+            books: book_list(&reserved)?,
         })
     })
     .await
@@ -169,13 +264,7 @@ pub async fn readest_backup_config(
             return Err(error("invalid-request", "Readest 指纹格式无效"));
         }
         let session = session(&window, &session_id)?;
-        let entry = session
-            .data
-            .lock()
-            .map_err(|_| error("storage-error", "迁入会话锁不可用"))?
-            .configs
-            .get(&readest_hash)
-            .cloned();
+        let entry = session.config_entry(&readest_hash)?;
         if entry.as_ref().is_some_and(|e| e.bytes > CONFIG_LIMIT) {
             return Err(error("too-large", "单书配置超出读取上限"));
         }
