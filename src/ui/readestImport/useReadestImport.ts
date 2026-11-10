@@ -76,7 +76,6 @@ export interface ReadestImportDeps {
 }
 
 const IMPORT_SLOT = "readest-import";
-/** Records are committed in small transactions so one bad book cannot sink many. */
 
 function scopeFor(store: ShelfStore): ReadestImportScope | null {
   if (activeShelfSpace().kind !== "private") return { kind: "public" };
@@ -315,13 +314,14 @@ export function useReadestImport({ shelfEntriesRef, refreshShelfProjection, setS
       setState({ kind: "importing", sourceLabel, done: Math.min(total, done + ahead), total, title, bytesDone, bytesTotal, stopping: stopRef.current });
     };
 
-    let batch: Array<{ title: string; payload: ReadestBookImportPayload; records: number }> = [];
+    let batch: Array<{ title: string; payload: ReadestBookImportPayload; records: number; approximate: ImportResult["approximate"] }> = [];
     const stagedHashes: string[] = [];
     const commitBooks = async (items: typeof batch): Promise<void> => {
       const outcome = await commitReadestImport(session.id, items.map((item) => item.payload), undefined, stagedHashes);
       addOutcome(result, outcome);
       result.booksAdded = outcome.booksAdded ?? 0;
       result.booksAlready = outcome.booksAlready ?? 0;
+      for (const item of items) result.approximate.push(...item.approximate);
       changed = true;
     };
     const flush = async (): Promise<void> => {
@@ -349,7 +349,7 @@ export function useReadestImport({ shelfEntriesRef, refreshShelfProjection, setS
         const built = bookPayload(row.readestHash, row.title, local, preview, rule);
         result.unplaced.push(...built.unplaced);
         if (built.payload) {
-          batch.push({ title: row.title, payload: built.payload, records: built.records });
+          batch.push({ title: row.title, payload: built.payload, records: built.records, approximate: built.approximate });
           if (batch.reduce((sum, item) => sum + item.records, 0) > READEST_COMMIT_MAX_RECORDS) throw new Error(uiText("readestImport.fail.tooMany"));
         } else if (built.records > 0) {
           throw new Error(uiText("readestImport.fail.tooMany"));
@@ -370,7 +370,7 @@ export function useReadestImport({ shelfEntriesRef, refreshShelfProjection, setS
         done += 1;
       }
 
-      // New books: stage a few, add them to the shelf, then their records.
+      // Prepare new originals off-shelf; publish once with all converted records below.
       for (const chunk of stageChunks(chosen.filter((item) => item.kind === "new"))) {
         if (stopRef.current || !current(session)) break;
         show(chunk[0].title);

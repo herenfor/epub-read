@@ -274,3 +274,44 @@ it("commits a staged book without records, reporting native duplicate counts rat
     expect(t.current().state).toMatchObject({ kind: "done", result: { booksAdded: 0, booksAlready: 1 } });
   } finally { await t.dom.dispose(); }
 });
+
+it.each([true, false])("reports approximate placements only after the combined commit succeeds (%s)", async (succeeds) => {
+  const t = await setup({ withLocalBook: true });
+  const commit = deferred<unknown>();
+  const exactPreview = ports.convert.getMockImplementation()!;
+  ports.convert.mockImplementation(async (...args) => {
+    const preview = await exactPreview(...args);
+    preview.bookmarks[0].grade = "approximate";
+    preview.bookmarks[0].reasons = ["anchored"];
+    return preview;
+  });
+  ports.commit.mockReturnValueOnce(commit.promise);
+  let pending!: Promise<void>;
+  try {
+    await t.dom.run(async () => { await t.start("approximate.zip"); });
+    await t.dom.run(async () => { pending = t.current().run(); await Promise.resolve(); });
+    await t.dom.run(async () => { await vi.waitFor(() => expect(ports.commit).toHaveBeenCalledTimes(1)); });
+    expect(t.current().state.kind).toBe("importing");
+    expect(ports.importPaths).not.toHaveBeenCalled();
+    expect(ports.commit.mock.calls[0][1]).toHaveLength(2);
+    expect(ports.commit.mock.calls[0][3]).toEqual([NEW]);
+    expect(ports.target).toHaveBeenCalledWith(expect.anything(), expect.anything(), {
+      sessionId: ports.open.mock.calls[0][0].sessionId, readestHash: NEW,
+    });
+    await t.dom.run(async () => {
+      if (succeeds) commit.resolve({ ...outcome, bookmarksAdded: 2, booksAdded: 1, booksAlready: 0 });
+      else commit.reject({ code: "storage-error" });
+      await pending;
+    });
+    const state = t.current().state;
+    expect(state.kind).toBe("done");
+    if (state.kind !== "done") return;
+    expect(state.result.approximate).toEqual(succeeds ? [
+      { title: "Shelved", kind: "bookmark", reasons: ["anchored"] },
+      { title: "New", kind: "bookmark", reasons: ["anchored"] },
+    ] : []);
+    expect(state.result.booksAdded).toBe(succeeds ? 1 : 0);
+    expect(state.result.bookmarksAdded).toBe(succeeds ? 2 : 0);
+    expect(ports.refresh).toHaveBeenCalledTimes(succeeds ? 1 : 0);
+  } finally { await t.dom.dispose(); }
+});

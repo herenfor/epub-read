@@ -2,6 +2,25 @@ import { defineMessages } from "../defineMessages";
 
 /** Readest import: source screen, the one book list, progress and the result. */
 export const readestImport = defineMessages("readestImport", {
+  "readestImport.done.approximate": "{count} 条按近似位置处理",
+  "readestImport.done.original": "查看原始记录",
+  "readestImport.reason.spine-guessed": "按书脊顺序定位",
+  "readestImport.reason.id-corrected": "按章节标识修正位置",
+  "readestImport.reason.text-relocated": "按原文重新定位",
+  "readestImport.reason.text-differs": "原文存在差异",
+  "readestImport.reason.bad-cfi": "来源位置格式无效",
+  "readestImport.reason.chapter-missing": "无法找到来源章节",
+  "readestImport.reason.node-missing": "来源段落不存在",
+  "readestImport.reason.outside-text": "位置不在可用正文中",
+  "readestImport.reason.text-mismatch": "原文对不上",
+  "readestImport.reason.text-ambiguous": "原文出现多次，无法确定位置",
+  "readestImport.reason.too-long": "记录超出可迁入范围，原始内容保留如下",
+  "readestImport.reason.ruby-annotation": "含注音，已按正文文字匹配",
+  "readestImport.reason.text-reconciled": "排版不同，已按正文内容匹配",
+  "readestImport.reason.cfi-only": "原文不同，按来源位置迁入",
+  "readestImport.reason.cfi-clamped": "位置超出段落，已放到段落末尾",
+  "readestImport.reason.anchored": "位置不完整，已放到最近的可用位置",
+
   "readestImport.title": "从 Readest 迁入",
   "readestImport.entry": { zh: "从 Readest 迁入", note: "Settings row title (Data & Backup)." },
   "readestImport.entry.detail": "把 Readest 里的书、阅读位置、书签和笔记搬过来",

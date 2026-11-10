@@ -12,7 +12,7 @@ import {
   type ReadestTargetCandidate,
 } from "../../platform/readestImportNativeBridge";
 import type { ReadestLibraryBook } from "./readestBackup";
-import type { ImportCandidate, ReadestBookPreview } from "./readestConvert";
+import type { ImportCandidate, ImportReason, ReadestBookPreview } from "./readestConvert";
 
 /** A shelf book the native side can attach Readest records to. */
 export interface LocalImportBook {
@@ -175,12 +175,24 @@ export function takesReadestPosition(rule: PositionRule, readestPct: number, loc
   return readestPct > localPct;
 }
 
+export interface ApproximateRecord {
+  title: string;
+  kind: "progress" | "bookmark" | "note";
+  reasons: ImportReason[];
+}
+
 /** A record the conversion could not place; listed after the import, never sent. */
 export interface UnplacedRecord {
   title: string;
   kind: "progress" | "bookmark" | "note";
   /** The text Readest captured there, when it kept one. */
   text: string | null;
+  reason: ImportReason;
+  cfi: string | null;
+  content?: string;
+  style?: string;
+  color?: string;
+  createdAtMs?: number | null;
 }
 
 const placed = (candidate: ImportCandidate<unknown>): boolean =>
@@ -191,6 +203,7 @@ export interface BookPayload {
   payload: ReadestBookImportPayload | null;
   records: number;
   unplaced: UnplacedRecord[];
+  approximate: ApproximateRecord[];
 }
 
 /** Everything the conversion placed is sent; only the position follows the rule. */
@@ -202,11 +215,20 @@ export function bookPayload(
   rule: PositionRule,
 ): BookPayload {
   const unplaced: UnplacedRecord[] = [];
+  const approximate: ApproximateRecord[] = [];
+  const remember = (candidate: ImportCandidate<unknown>, kind: ApproximateRecord["kind"]): void => {
+    if (candidate.grade === "approximate") approximate.push({ title, kind, reasons: candidate.reasons });
+  };
+  const lost = (candidate: ImportCandidate<unknown>, kind: ApproximateRecord["kind"]): UnplacedRecord => ({
+    title, kind, ...candidate.source, reason: candidate.reasons[0] ?? "outside-text",
+  });
   const keep = <T,>(candidates: readonly ImportCandidate<T>[], kind: "bookmark" | "note") => {
     const sent: Array<{ sourceKey: string; value: T }> = [];
     for (const candidate of candidates) {
-      if (placed(candidate)) sent.push({ sourceKey: candidate.sourceKey, value: candidate.value as T });
-      else unplaced.push({ title, kind, text: candidate.source.text });
+      if (placed(candidate)) {
+        sent.push({ sourceKey: candidate.sourceKey, value: candidate.value as T });
+        remember(candidate, kind);
+      } else unplaced.push(lost(candidate, kind));
     }
     return sent;
   };
@@ -215,11 +237,11 @@ export function bookPayload(
   let progress: NonNullable<ProgressValue> | null = null;
   if (preview.progress) {
     const value = placed(preview.progress) ? preview.progress.value as NonNullable<ProgressValue> : null;
-    if (!value) unplaced.push({ title, kind: "progress", text: null });
-    else if (takesReadestPosition(rule, value.progressPctHint, local.progressPct)) progress = value;
+    if (!value) unplaced.push(lost(preview.progress, "progress"));
+    else if (takesReadestPosition(rule, value.progressPctHint, local.progressPct)) { progress = value; remember(preview.progress, "progress"); }
   }
   const records = bookmarks.length + notes.length + (progress ? 1 : 0);
-  if (records === 0 || records > READEST_COMMIT_MAX_RECORDS) return { payload: null, records, unplaced };
+  if (records === 0 || records > READEST_COMMIT_MAX_RECORDS) return { payload: null, records, unplaced, approximate };
   return {
     payload: {
       bookHash: local.bookHash,
@@ -231,6 +253,7 @@ export function bookPayload(
     },
     records,
     unplaced,
+    approximate,
   };
 }
 
@@ -250,6 +273,7 @@ export interface ImportResult {
   /** Records the shelf already had from an earlier import. */
   skippedExisting: number;
   unplaced: UnplacedRecord[];
+  approximate: ApproximateRecord[];
   /** Handwriting and notebook records, which have no counterpart here. */
   unsupported: number;
   failed: FailedBook[];
@@ -262,7 +286,7 @@ export interface ImportResult {
 
 export const emptyResult = (): ImportResult => ({
   booksAdded: 0, booksAlready: 0, bookmarksAdded: 0, notesAdded: 0, progressWritten: 0, skippedExisting: 0,
-  unplaced: [], unsupported: 0, failed: [], stopped: false, notReached: 0, error: null,
+  unplaced: [], approximate: [], unsupported: 0, failed: [], stopped: false, notReached: 0, error: null,
 });
 
 export function addOutcome(result: ImportResult, outcome: ReadestImportOutcome): void {

@@ -18,6 +18,7 @@ import {
   resolveCfiSpine,
   type CfiPath,
 } from "../../render/interop/epubCfi";
+import { placeReadestNote } from "./readestPlacement";
 import { normalizeAnchorText } from "../../render/textAnchor";
 import {
   isNoteColor,
@@ -62,7 +63,8 @@ export type ImportReason =
   | "outside-text"
   | "text-mismatch"
   | "text-ambiguous"
-  | "too-long";
+  | "too-long"
+  | "ruby-annotation" | "text-reconciled" | "cfi-only" | "cfi-clamped" | "anchored";
 
 export interface ImportCandidate<T> {
   /** Stable per source record, so importing the same backup twice adds nothing. */
@@ -71,7 +73,7 @@ export interface ImportCandidate<T> {
   reasons: ImportReason[];
   /** Null exactly when grade is "unresolved" or "unsupported". */
   value: T | null;
-  source: { cfi: string; text: string | null };
+  source: { cfi: string; text: string | null; content?: string; style?: NoteStyle; color?: string; createdAtMs?: number | null };
 }
 
 export interface ReadestBookPreview {
@@ -80,7 +82,7 @@ export interface ReadestBookPreview {
   notes: ImportCandidate<NoteValue>[];
 }
 
-interface Placed {
+export interface Placed {
   spineIndex: number;
   chapterPath: string;
   index: ChapterTextIndex;
@@ -88,9 +90,9 @@ interface Placed {
   reasons: ImportReason[];
 }
 
-type PointResult = { ok: true; placed: Placed } | { ok: false; reason: ImportReason; chapter?: Omit<Placed, "offset"> };
+export type PointResult = { ok: true; placed: Placed } | { ok: false; reason: ImportReason; chapter?: Omit<Placed, "offset"> };
 
-class ChapterCache {
+export class ChapterCache {
   private readonly cache = new Map<number, Promise<ChapterTextIndex | null>>();
   constructor(private readonly target: ReadestImportTarget) {}
   get(spineIndex: number): Promise<ChapterTextIndex | null> {
@@ -103,7 +105,7 @@ class ChapterCache {
   }
 }
 
-async function placePoint(path: CfiPath, target: ReadestImportTarget, chapters: ChapterCache): Promise<PointResult> {
+export async function placePoint(path: CfiPath, target: ReadestImportTarget, chapters: ChapterCache, clamp = false): Promise<PointResult> {
   if (path.length !== 2) return { ok: false, reason: "bad-cfi" };
   const spine = resolveCfiSpine(path[0], target.spineIdrefs, target.opfDocument);
   if (!spine) return { ok: false, reason: "chapter-missing" };
@@ -113,11 +115,11 @@ async function placePoint(path: CfiPath, target: ReadestImportTarget, chapters: 
   const reasons: ImportReason[] = spine.via === "path" ? [] : ["spine-guessed"];
   const chapter = { spineIndex: spine.spineIndex, chapterPath, index, reasons };
   const doc = index.root.ownerDocument;
-  const resolved = doc ? resolveCfiInDocument(doc, path[1]) : null;
+  const resolved = doc ? resolveCfiInDocument(doc, path[1], { clampTextOffset: clamp }) : null;
   if (!resolved) return { ok: false, reason: "node-missing", chapter };
   const offset = index.offsetAt(resolved.point);
   if (offset === null) return { ok: false, reason: "outside-text", chapter };
-  return { ok: true, placed: { ...chapter, offset, reasons: resolved.idCorrected ? [...reasons, "id-corrected"] : reasons } };
+  return { ok: true, placed: { ...chapter, offset, reasons: [...reasons, ...(resolved.idCorrected ? ["id-corrected" as const] : []), ...(resolved.clamped ? ["cfi-clamped" as const] : [])] } };
 }
 
 const gradeOf = (reasons: readonly ImportReason[]): ImportGrade => (reasons.length ? "approximate" : "exact");
@@ -143,17 +145,8 @@ function createdAt(record: ReadestRecord, nowMs: number): number {
   return at !== null && at <= nowMs + ONE_DAY_MS ? at : nowMs;
 }
 
-/** Choose among text occurrences: the unique one nearest the CFI, never just the first. */
-function pickOccurrence(hits: readonly number[], near: number | null): number | null {
-  if (hits.length === 1) return hits[0];
-  if (!hits.length || near === null) return null;
-  const distance = Math.min(...hits.map((hit) => Math.abs(hit - near)));
-  const nearest = hits.filter((hit) => Math.abs(hit - near) === distance);
-  return nearest.length === 1 ? nearest[0] : null;
-}
-
 const unresolved = <T>(sourceKey: string, record: { cfi: string; text: string | null }, reason: ImportReason): ImportCandidate<T> =>
-  ({ sourceKey, grade: "unresolved", reasons: [reason], value: null, source: { cfi: record.cfi, text: record.text } });
+  ({ sourceKey, grade: "unresolved", reasons: [reason], value: null, source: { ...record, content: "note" in record ? String(record.note) : undefined } });
 
 async function convertProgress(
   hash: string,
@@ -166,16 +159,25 @@ async function convertProgress(
   const source = { cfi: config.location, text: null };
   const parsed = parseEpubCfi(config.location);
   if (!parsed) return unresolved(sourceKey, source, "bad-cfi");
-  const point = await placePoint(collapseCfi(parsed), target, chapters);
+  let point = await placePoint(collapseCfi(parsed), target, chapters, true);
+  let usedRangeEnd = false;
+  if (!point.ok && parsed.kind === "range") {
+    usedRangeEnd = true;
+    point = await placePoint(collapseCfi(parsed, true), target, chapters, true);
+  }
   if (!point.ok) return unresolved(sourceKey, source, point.reason);
   const { placed } = point;
+  // A range whose start cannot be placed but whose end can is still approximate,
+  // even when the end itself needs no clamp.
+  const reasons = usedRangeEnd && !placed.reasons.includes("anchored")
+    ? [...placed.reasons, "anchored" as const] : placed.reasons;
   const pct = config.pages
     ? (config.pages[0] / config.pages[1]) * 100
     : (placed.spineIndex / Math.max(1, target.spineIdrefs.length)) * 100;
   return {
     sourceKey,
-    grade: gradeOf(placed.reasons),
-    reasons: placed.reasons,
+    grade: gradeOf(reasons),
+    reasons,
     // The native progress hint is an integer percentage.
     value: { locator: locatorAt(placed), progressPctHint: Math.round(Math.max(0, Math.min(100, pct))) },
     source,
@@ -191,10 +193,19 @@ async function convertBookmark(
 ): Promise<ImportCandidate<BookmarkValue>> {
   const parsed = parseEpubCfi(record.cfi);
   if (!parsed) return unresolved(sourceKey, record, "bad-cfi");
-  const point = await placePoint(collapseCfi(parsed), target, chapters);
+  const path = collapseCfi(parsed);
+  let point = await placePoint(path, target, chapters, true);
+  if (!point.ok && point.chapter) {
+    const chapter = point.chapter;
+    for (let count = path[1].length - 1; count > 0 && !point.ok; count--) {
+      point = await placePoint([path[0], path[1].slice(0, count)], target, chapters);
+    }
+    point = point.ok ? { ok: true, placed: { ...point.placed, reasons: [...point.placed.reasons, "anchored"] } }
+      : { ok: true, placed: { ...chapter, offset: 0, reasons: [...chapter.reasons, "anchored"] } };
+  }
   if (!point.ok) return unresolved(sourceKey, record, point.reason);
   const { placed } = point;
-  const reasons = [...placed.reasons];
+  const reasons = placed.reasons.map((reason) => reason === "cfi-clamped" ? "anchored" as const : reason);
   // The excerpt Readest kept should start where the bookmark points. A
   // mismatch is reported, but a bookmark's position is still usable.
   const excerpt = record.text ? Array.from(normalizeAnchorText(record.text)).slice(0, 8).join("") : "";
@@ -210,7 +221,7 @@ async function convertBookmark(
     reasons,
     // Cut by code point: a UTF-16 cut can leave a lone surrogate that fails JSON round trips.
     value: { locator, text: Array.from(label).slice(0, BOOKMARK_TEXT_CHARS).join(""), createdAtMs: createdAt(record, nowMs) },
-    source: { cfi: record.cfi, text: record.text },
+    source: { ...record, content: "note" in record ? String(record.note) : undefined },
   };
 }
 
@@ -232,25 +243,11 @@ async function convertNote(
   }
   const parsed = parseEpubCfi(record.cfi);
   if (!parsed) return unresolved(sourceKey, record, "bad-cfi");
-  const startPoint = await placePoint(collapseCfi(parsed), target, chapters);
-  const endPoint = parsed.kind === "range" ? await placePoint(collapseCfi(parsed, true), target, chapters) : null;
-  const chapter = startPoint.ok ? startPoint.placed : startPoint.chapter;
-  if (!chapter) return unresolved(sourceKey, record, startPoint.ok ? "chapter-missing" : startPoint.reason);
-  const reasons = [...chapter.reasons];
-  let start: number | null = null;
-  if (startPoint.ok && endPoint?.ok && endPoint.placed.spineIndex === chapter.spineIndex
-    && chapter.index.slice(startPoint.placed.offset, endPoint.placed.offset) === needle) {
-    start = startPoint.placed.offset;
-  } else {
-    // The CFI and the captured text disagree (or the CFI could not be walked):
-    // trust the text only when it identifies one place in this chapter.
-    const near = startPoint.ok ? startPoint.placed.offset : null;
-    const hits = chapter.index.occurrences(needle);
-    start = pickOccurrence(hits, near);
-    if (start === null) return unresolved(sourceKey, record, hits.length ? "text-ambiguous" : "text-mismatch");
-    reasons.push("text-relocated");
-  }
-  const end = start + needleLength;
+  const placement = await placeReadestNote(parsed, selected, target, chapters);
+  if (!placement) return unresolved(sourceKey, record, "chapter-missing");
+  const { chapter, start, end, reasons } = placement;
+  if (end <= start) return unresolved(sourceKey, record, "outside-text");
+  if (end - start > MAX_NOTE_SELECTED_CODE_POINTS) return unresolved(sourceKey, record, "too-long");
 
   let color: NoteColor | undefined;
   if (record.color) {
@@ -273,13 +270,13 @@ async function convertNote(
       endTextOffset: end,
       startTextSnippet: chapter.index.snippetAt(start)!,
       endTextSnippet: chapter.index.snippetBefore(end)!,
-      selectedText: selected,
+      selectedText: chapter.index.slice(start, end),
       content,
       ...(style !== undefined ? { style } : {}),
       ...(color !== undefined ? { color } : {}),
       createdAtMs: createdAt(record, nowMs),
     },
-    source: { cfi: record.cfi, text: record.text },
+    source: { ...record, content: "note" in record ? String(record.note) : undefined },
   };
 }
 
