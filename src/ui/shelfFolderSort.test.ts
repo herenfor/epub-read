@@ -31,9 +31,9 @@ function organization(): LibraryOrganization {
   };
 }
 
-function props(scope: ShelfScope): ShelfViewProps {
+function props(scope?: ShelfScope): ShelfViewProps {
   return {
-    entries: [...inFolder, ...loose], organization: organization(), scope, busy: false, theme: "light",
+    entries: [...inFolder, ...loose], organization: organization(), ...(scope ? { scope } : {}), busy: false, theme: "light",
     onThemeChange: () => {}, onOpen: () => {}, onImport: () => {}, onImportArchive: () => {},
     onExportArchive: () => {}, onDelete: () => {}, onDeleteMany: () => {}, onApplyOrganization: async () => {},
   };
@@ -60,23 +60,21 @@ async function pickSort(dom: Harness, root: ParentNode, label: string): Promise<
   await dom.click(option!);
 }
 
-it("文件夹内排序只改文件夹（弹窗与全页共用、本机记住），根层顺序和已选书不变", async () => {
+it("文件夹内排序只改文件夹（本机记住），根层顺序和已选书不变", async () => {
   const store = stubStorage();
   const dom = createReactDomHarness();
   try {
-    await dom.render(createElement(ShelfView, props({ type: "root" })));
+    await dom.render(createElement(ShelfView, props()));
     expect(cardTitles(dom.container)).toEqual(["丁", "丙"]);
 
-    // 弹窗初次跟随书架的“最近阅读”。
+    // 文件夹页初次跟随书架的“最近阅读”，改排序后只影响文件夹层。
     await dom.click(dom.container.querySelector(`[data-folder-id="${FOLDER}"]`)!);
-    const modal = dom.container.querySelector(".shelf-folder-modal")!;
-    expect(cardTitles(modal)).toEqual(["乙", "甲"]);
-    await pickSort(dom, modal.querySelector(".shelf-folder-modal-sort")!, "排序：书名排序");
-    expect(cardTitles(modal)).toEqual(["甲", "乙"]);
+    expect(cardTitles(dom.container)).toEqual(["乙", "甲"]);
+    await pickSort(dom, dom.container.querySelector(".shelf-nav-rail-right")!, "排序：书名排序");
+    expect(cardTitles(dom.container)).toEqual(["甲", "乙"]);
     expect(store.get("epub_shelf_folder_sort")).toBe("title");
-    const root = [...dom.container.querySelectorAll(".shelf-card[data-book-id]")]
-      .filter((card) => !card.closest(".shelf-folder-modal"));
-    expect(root.map((card) => card.querySelector(".shelf-card-title")?.textContent)).toEqual(["丁", "丙"]);
+    await dom.click(dom.container.querySelector(".shelf-folder-path-crumb")!);
+    expect(cardTitles(dom.container)).toEqual(["丁", "丙"]);
   } finally {
     await dom.dispose();
   }

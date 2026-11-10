@@ -59,8 +59,9 @@ function setup() {
     entriesRef.current = entries.shelfEntries;
     const hashes = useShelfContentHashes(entries.shelfEntries);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const importContextRef = useRef<{ folderId: string; name: string } | null>(null);
     const commands = useBookImport({ importState: imports, runtime: { ...getRuntimeCapabilities(), platform: "android" }, isTauriEnv: () => true, fileInputRef, shelfBusyRef: busy, shelfEntriesRef: entriesRef, ...hashes, setShelfEntries: entries.setShelfEntries, setShelfNotice: notices.setShelfNotice, setOrganization });
-    const folders = useFolderImport({ importState: imports, shelfBusyRef: busy, organizationBusyRef: organizationBusy, saveFileJobStateRef: saveState, saveFileLaunchRef: saveLaunch, lanSaveActiveRef: lanActive, isTauriEnv: () => true, setShelfNotice: notices.setShelfNotice, refreshShelfProjection: refresh });
+    const folders = useFolderImport({ importState: imports, shelfBusyRef: busy, organizationBusyRef: organizationBusy, saveFileJobStateRef: saveState, saveFileLaunchRef: saveLaunch, lanSaveActiveRef: lanActive, importContextRef, isTauriEnv: () => true, setShelfNotice: notices.setShelfNotice, refreshShelfProjection: refresh });
     return { entries, notices, imports, commands, folders };
   }
   let api!: ReturnType<typeof useHost>;

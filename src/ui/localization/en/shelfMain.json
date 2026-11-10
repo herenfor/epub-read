@@ -159,5 +159,16 @@
   "shelfMain.dock.delete.tip": "Delete selected books from library",
   "shelfMain.dock.delete": "Delete",
   "shelfMain.dock.exit.tip": "Exit batch selection",
-  "shelfMain.dock.exit": "Done"
+  "shelfMain.dock.exit": "Done",
+  "shelfMain.folder.path": "Location",
+  "shelfMain.folder.up": "Go up one level",
+  "shelfMain.folder.root": "Library",
+  "shelfMain.folder.directTotal": "{direct} direct · {total} total",
+  "shelfMain.folder.newChild": "New Subfolder",
+  "shelfMain.folder.move": "Move to…",
+  "shelfMain.folder.levelFive.hint": "This is the fifth level; subfolders cannot go deeper. Importing a folder tree here puts books from deeper directories directly in this level.",
+  "shelfMain.folder.levelFive.short": "Fifth level",
+  "shelfMain.folders.newIn": "New folder in \"{name}\"",
+  "shelfMain.folders.collapse.one": "Collapse {name}",
+  "shelfMain.folders.expand.one": "Expand {name}"
 }

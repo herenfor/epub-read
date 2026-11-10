@@ -158,3 +158,200 @@
   min-height: 44px;
   font-size: var(--fs-emph);
 }
+
+/* ER-0170：导入预览改为按 groupKey 的父子树，行内缩进 + 目标选择。 */
+.folder-import-dialog {
+  width: min(680px, 100%);
+}
+
+.folder-import-where {
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--accent) 8%, var(--shelf-card-bg));
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--panel-border));
+  font-size: var(--fs-body);
+  line-height: 1.5;
+}
+
+.folder-import-where b {
+  margin-left: 4px;
+  overflow-wrap: anywhere;
+}
+
+.folder-import-where small {
+  display: block;
+  color: var(--muted);
+  font-size: var(--fs-caption);
+}
+
+.folder-import-dialog .save-file-summary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.folder-import-opts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.folder-import-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 4px 0 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  color: var(--muted);
+  font-size: var(--fs-caption);
+}
+
+.folder-import-opt select {
+  min-width: 0;
+  max-width: 220px;
+  min-height: 30px;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.folder-import-opt.is-check {
+  padding-right: 10px;
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.folder-import-opts-hint {
+  margin: -4px 0 0;
+  color: var(--muted);
+  font-size: var(--fs-caption);
+  line-height: 1.4;
+}
+
+.folder-import-note {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, #d18a12 38%, var(--panel-border));
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, #d18a12 10%, var(--bg));
+  color: color-mix(in srgb, #7a5600 70%, var(--fg));
+  font-size: var(--fs-caption);
+  line-height: 1.5;
+}
+
+.folder-import-groups ul.folder-import-tree {
+  gap: 0;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+.folder-import-groups .folder-import-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 5px 10px 5px 12px;
+  border-radius: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
+  background: transparent;
+}
+
+.folder-import-groups .folder-import-tree-row:last-child {
+  border-bottom: 0;
+}
+
+.folder-import-groups .folder-import-tree-row.is-unresolved {
+  outline: 0;
+  background: color-mix(in srgb, #d18a12 10%, transparent);
+}
+
+.folder-import-tree-indent {
+  flex: none;
+}
+
+.folder-import-tree-row .folder-import-group-name {
+  flex: 1;
+  font-size: var(--fs-body);
+}
+
+.folder-import-tree-row.is-fifth {
+  background: color-mix(in srgb, #d18a12 6%, transparent);
+}
+
+.folder-import-tree-row.is-anchor {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.folder-import-foot-note {
+  flex: 1;
+  min-width: 0;
+  align-self: center;
+  color: var(--muted);
+  font-size: var(--fs-caption);
+  line-height: 1.4;
+}
+
+.folder-import-tree-icon {
+  display: inline-flex;
+  color: var(--muted);
+}
+
+.folder-import-tree-row.is-anchor .folder-import-tree-icon {
+  color: var(--accent);
+}
+
+.folder-import-tree-fixed {
+  color: var(--muted);
+  font-size: var(--fs-caption);
+  white-space: nowrap;
+}
+
+.folder-import-tag {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: color-mix(in srgb, #d18a12 22%, var(--bg));
+  color: color-mix(in srgb, #7a5600 70%, var(--fg));
+  font-size: 11px;
+  font-weight: 500;
+  vertical-align: 1px;
+}
+
+.folder-import-groups .folder-import-target {
+  flex: none;
+  width: 190px;
+  min-height: 32px;
+  padding: 4px 8px;
+}
+
+@media (max-width: 560px) {
+  .folder-import-dialog .save-file-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .folder-import-groups .folder-import-tree-row {
+    flex-wrap: wrap;
+  }
+
+  .folder-import-groups .folder-import-target {
+    flex: 1 1 100%;
+    width: auto;
+  }
+
+  .folder-import-foot-note {
+    display: none;
+  }
+}
+
+.folder-import-opt select,
+.folder-import-groups .folder-import-target {
+  appearance: auto;
+}

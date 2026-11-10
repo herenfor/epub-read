@@ -13,6 +13,7 @@ import type {
 import {
   planDirectoryImport,
   SuccessfulSources,
+  type ImportAnchor,
   type ImportOptions,
   type ImportRoot,
   type ScannedEpub,
@@ -121,6 +122,8 @@ export function scanWebDirectoryFiles(
 interface WebJob {
   readonly root: ImportRoot;
   readonly items: readonly ScannedEpub[];
+  /** Current shelf folder when the source was chosen; fixed for the job. */
+  readonly anchor: ImportAnchor | undefined;
   /** File references stay in this closure, never in React state or storage. */
   files: Map<string, File> | null;
   readonly issues: ImportIssue[];
@@ -163,11 +166,25 @@ export function createWebDirectoryImportPort(options: WebDirectoryImportOptions)
     targets: readonly FolderTarget[],
     onProgress: (event: DirectoryProgress) => void,
   ): Promise<DirectoryImportResult> {
-    const plan = planDirectoryImport(job.root, job.items, importOptions);
+    const plan = planDirectoryImport(job.root, job.items, importOptions, job.anchor);
     const targetByGroup = new Map(targets.map((target) => [target.groupKey, target]));
     if (targets.length !== plan.groups.length || plan.groups.some((group) => !targetByGroup.has(group.groupKey))) {
       throw new Error("导入目标与预览分组不一致，请重新预览");
     }
+    // At the fifth level the planner has no new groups; its directFolderId
+    // says "file these books into the current folder" instead.
+    const directTargetByFolder = new Map<string, FolderTarget>();
+    for (const input of plan.inputs) {
+      if (input.groupKey !== null || !input.directFolderId) continue;
+      if (!directTargetByFolder.has(input.directFolderId)) {
+        directTargetByFolder.set(input.directFolderId, {
+          groupKey: `direct:${input.directFolderId}`,
+          kind: "reuse",
+          folderId: input.directFolderId,
+        });
+      }
+    }
+    const placementTargets = [...targets, ...directTargetByFolder.values()];
     const counts = {
       completed: 0, imported: 0, duplicates: 0, failed: 0, placementSkipped: 0, createdFolders: 0,
     };
@@ -216,6 +233,7 @@ export function createWebDirectoryImportPort(options: WebDirectoryImportOptions)
         const committed = await store.commitDirectoryPlacementBatch({
           policy: importOptions.existingPlacement,
           items: batch,
+          targets: placementTargets,
         });
         for (const outcome of committed.outcomes) {
           const decision = outcome.decision;
@@ -244,7 +262,9 @@ export function createWebDirectoryImportPort(options: WebDirectoryImportOptions)
     for (const input of plan.inputs) {
       if (job.cancelRequested) break;
       const file = job.files?.get(input.inputId);
-      const target = input.groupKey === null ? null : targetByGroup.get(input.groupKey)!;
+      const target = input.groupKey === null
+        ? (input.directFolderId ? directTargetByFolder.get(input.directFolderId)! : null)
+        : targetByGroup.get(input.groupKey)!;
       if (!file) {
         counts.completed++;
         counts.failed++;
@@ -359,7 +379,7 @@ export function createWebDirectoryImportPort(options: WebDirectoryImportOptions)
   }
 
   return {
-    async scan(onProgress): Promise<ScanResult | null> {
+    async scan(onProgress, anchor): Promise<ScanResult | null> {
       const files = await pick();
       if (!files) return null;
       const jobId = newId();
@@ -367,6 +387,7 @@ export function createWebDirectoryImportPort(options: WebDirectoryImportOptions)
       jobs.set(jobId, {
         root: scanned.root,
         items: scanned.items,
+        anchor,
         files: scanned.files,
         issues: [],
         running: null,

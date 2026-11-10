@@ -94,7 +94,7 @@ describe("native window drops", () => {
   });
 });
 
-async function renderShelf(scope: ShelfScope = { type: "root" }, externalDropFolderId: string | null = null) {
+async function renderShelf(scope: ShelfScope | null = null, externalDropFolderId: string | null = null) {
   const dom = createReactDomHarness();
   const commands: OrganizationCommand[] = [];
   const imports: Array<{ folderId: string; name: string } | "root"> = [];
@@ -102,7 +102,7 @@ async function renderShelf(scope: ShelfScope = { type: "root" }, externalDropFol
   const props: ShelfViewProps = {
     entries: [filedBook, looseBook, elsewhereBook],
     organization: organization(),
-    scope,
+    ...(scope ? { scope } : {}),
     busy: false,
     theme: "light",
     onThemeChange: () => {},
@@ -134,7 +134,7 @@ describe("folder sheet: import new books and add existing ones", () => {
       expect(shelf.contexts.at(-1)).toBeNull();
       await shelf.dom.click(shelf.dom.container.querySelector(`[data-folder-id="${FOLDER_A}"]`)!);
       expect(shelf.contexts.at(-1)).toEqual({ folderId: FOLDER_A, name: "资料" });
-      await shelf.dom.click(shelf.button(".shelf-folder-modal-foot-btn", "导入新书"));
+      await shelf.dom.click(shelf.button(".shelf-folder-path-action", "导入新书"));
       expect(shelf.imports).toEqual([{ folderId: FOLDER_A, name: "资料" }]);
     } finally {
       await shelf.dom.dispose();
@@ -145,7 +145,8 @@ describe("folder sheet: import new books and add existing ones", () => {
     const shelf = await renderShelf();
     try {
       await shelf.dom.click(shelf.dom.container.querySelector(`[data-folder-id="${FOLDER_A}"]`)!);
-      await shelf.dom.click(shelf.button(".shelf-folder-modal-foot-btn", "从书库添加"));
+      await shelf.dom.click(shelf.dom.container.querySelector(".shelf-folder-path-more")!);
+      await shelf.dom.click(shelf.button(".shelf-folder-menu-item", "从书库添加"));
       const dialog = shelf.doc.querySelector(".shelf-add-books-dialog")!;
       const rows = Array.from(dialog.querySelectorAll(".shelf-add-books-item"));
       expect(rows.map((row) => row.querySelector(".shelf-add-books-name")?.textContent)).toEqual(["未归类的书", "别处的书"]);

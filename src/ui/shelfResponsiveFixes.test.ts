@@ -72,15 +72,15 @@ describe("第三步补修：书架触摸长按与子菜单 Back", () => {
       const folder = [...dom.container.querySelectorAll(".shelf-folder-menu-item")]
         .find((item) => item.textContent?.includes("测试文件夹")) as HTMLElement;
       await dom.click(folder);
-      expect(dom.container.querySelector(".shelf-folder-active-bar")).not.toBeNull();
+      expect(dom.container.querySelector(".shelf-folder-path-bar")).not.toBeNull();
       expect(availability.at(-1)).toBe(true);
       await dom.click(dom.container.querySelector(".shelf-manage-toggle-btn") as HTMLElement);
       await dom.run(() => { expect(back?.()).toBe(true); });
       await dom.run(() => new Promise<void>((resolve) => setTimeout(resolve, MENU_CLOSE_MS + 20)));
       expect(dom.container.querySelector(".shelf-view.selection-mode")).toBeNull();
-      expect(dom.container.querySelector(".shelf-folder-active-bar")).not.toBeNull();
+      expect(dom.container.querySelector(".shelf-folder-path-bar")).not.toBeNull();
       await dom.run(() => { expect(back?.()).toBe(true); });
-      expect(dom.container.querySelector(".shelf-folder-active-bar")).toBeNull();
+      expect(dom.container.querySelector(".shelf-folder-path-bar")).toBeNull();
       expect(availability.at(-1)).toBe(false);
       await dom.run(() => { expect(back?.()).toBe(false); });
     } finally {

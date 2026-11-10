@@ -26,6 +26,12 @@ export interface DirectoryPlacementItem {
 export interface DirectoryPlacementBatch {
   readonly policy: ImportOptions["existingPlacement"];
   readonly items: readonly DirectoryPlacementItem[];
+  /**
+   * Every target in the preview. A Web batch may need a planned parent folder
+   * that has no direct book of its own; creating it in this same transaction
+   * keeps a child from being committed under a missing ancestor.
+   */
+  readonly targets?: readonly FolderTarget[];
 }
 
 export interface DirectoryPlacementOutcome {
@@ -90,22 +96,71 @@ export function applyDirectoryPlacementBatch(
       batch.policy,
     );
     if (decision.kind === "move") {
-      if (target.kind === "create" && !folder) creates.set(target.folderId, target);
+      // Keep every planned target, existing or new: an existing one created by
+      // an earlier batch still has to match the parent the preview promised.
+      if (target.kind === "create") creates.set(target.folderId, target);
       const list = moves.get(decision.folderId) ?? [];
       list.push(item.contentHash);
       moves.set(decision.folderId, list);
     }
     return { inputId: item.inputId, contentHash: item.contentHash, decision };
   });
-  let next = envelope;
-  for (const target of creates.values()) {
-    next = applyCommand(next, { type: "createFolder", folderId: target.folderId, name: target.name }, knownContentHashes);
+  const allTargets = batch.targets ?? [...creates.values()];
+  const createByFolder = new Map<string, Extract<FolderTarget, { kind: "create" }>>();
+  for (const target of allTargets) {
+    if (target.kind === "create") createByFolder.set(target.folderId, target);
   }
+  // The batch may have to create a planned ancestor that carries no book of
+  // its own: walk up from every newly created target and keep the create chain.
+  const needed = new Map<string, Extract<FolderTarget, { kind: "create" }>>();
+  const requireAncestors = (target: Extract<FolderTarget, { kind: "create" }>): void => {
+    if (needed.has(target.folderId)) return;
+    needed.set(target.folderId, target);
+    const parentId = target.parentFolderId ?? null;
+    const parentTarget = parentId === null ? undefined : createByFolder.get(parentId);
+    if (parentTarget) requireAncestors(parentTarget);
+  };
+  for (const target of creates.values()) requireAncestors(target);
+
+  let next = envelope;
+  const createdFolderIds = new Set<string>();
+  const creating = new Set<string>();
+  const createTarget = (target: Extract<FolderTarget, { kind: "create" }>): void => {
+    if (createdFolderIds.has(target.folderId)) return;
+    const existing = next.state.folders[target.folderId];
+    const expectedParent = target.parentFolderId ?? null;
+    if (existing) {
+      if (existing.deleted) throw new Error("导入目标文件夹已解散，请重新预览");
+      const currentParent = existing.parentId?.value ?? null;
+      // A folder created by an earlier batch moved since the preview: do not
+      // silently commit the rest of the tree under a changed ancestor.
+      if (currentParent !== expectedParent) throw new Error("导入目标文件夹位置已变化，请重新预览");
+      createdFolderIds.add(target.folderId);
+      return;
+    }
+    if (creating.has(target.folderId)) throw new Error("导入目标文件夹层级存在环");
+    creating.add(target.folderId);
+    const parentId = target.parentFolderId ?? null;
+    if (parentId !== null) {
+      const parentTarget = createByFolder.get(parentId) ?? needed.get(parentId);
+      if (parentTarget) {
+        createTarget(parentTarget);
+      } else {
+        const parent = next.state.folders[parentId];
+        if (!parent || parent.deleted) throw new Error("导入目标祖先文件夹不存在或已解散，请重新预览");
+      }
+    }
+    next = applyCommand(next, { type: "createFolder", folderId: target.folderId, name: target.name, parentId }, knownContentHashes);
+    creating.delete(target.folderId);
+    createdFolderIds.add(target.folderId);
+  };
+  for (const target of needed.values()) createTarget(target);
+
   for (const [folderId, contentHashes] of moves) {
     next = applyCommand(next, { type: "moveBooks", contentHashes, folderId }, knownContentHashes);
   }
   return {
     envelope: next,
-    result: { outcomes, createdFolderIds: [...creates.keys()], organization: next.state },
+    result: { outcomes, createdFolderIds: [...createdFolderIds], organization: next.state },
   };
 }

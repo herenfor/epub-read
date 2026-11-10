@@ -62,5 +62,20 @@
   "shelfFolder.addBooks.more.one": "{count} more — show more",
   "shelfFolder.addBooks.moveNote": "Books from other folders will be moved here.",
   "shelfFolder.addBooks.confirm.other": "Add {count} Books",
-  "shelfFolder.addBooks.confirm.one": "Add {count} Book"
+  "shelfFolder.addBooks.confirm.one": "Add {count} Book",
+  "shelfFolder.moveFolder": "Move to…",
+  "shelfFolder.card.meta": "{books} books · {folders} subfolders",
+  "shelfFolder.move.folderTitle": "Move folder \"{name}\"",
+  "shelfFolder.move.folderHint": "Its {count} levels of subfolders move with it; book placement is unchanged.",
+  "shelfFolder.move.bookHint": "A book belongs to one folder; unclassified means the library root.",
+  "shelfFolder.move.target": "Target location",
+  "shelfFolder.move.to": "Move to: ",
+  "shelfFolder.move.newInSelected": "New folder inside the selected location",
+  "shelfFolder.move.confirmFolder": "Move Folder",
+  "shelfFolder.move.rootFolder": "Library (root)",
+  "shelfFolder.move.block.already": "Already here",
+  "shelfFolder.move.block.self": "It is this folder",
+  "shelfFolder.move.block.inside": "Inside itself",
+  "shelfFolder.move.block.tooDeep": "Would exceed five levels",
+  "shelfFolder.move.block.sameName": "Same name already here"
 }
