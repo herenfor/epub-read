@@ -2,11 +2,18 @@ import { describe, expect, it } from "vitest";
 import {
   applyCommand,
   compareStamp,
+  effectiveFolderAncestors,
+  effectiveFolderChildren,
+  effectiveFolderDepth,
+  effectiveFolderDescendants,
   effectiveFolderId,
+  effectiveFolderParent,
   emptyOrganization,
   isFavorite,
   mergeIntoEnvelope,
   mergeOrganization,
+  MAX_FOLDER_DEPTH,
+  maxObservedCounter,
   nextStamp,
   normalizeFolderName,
   STAMP_COLLISION,
@@ -56,7 +63,7 @@ function state(
   books: Array<[string, BookOrganization]> = [],
 ): LibraryOrganization {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     folders: Object.fromEntries(folders),
     books: Object.fromEntries(books),
   };
@@ -205,6 +212,10 @@ describe("applyCommand reducer behaviors", () => {
     expect(next.counter).toBe(1);
     expect(next.state.folders[FOLDER_F].name.value).toBe("科幻小说");
     expect(next.state.folders[FOLDER_F].name.stamp).toEqual({ counter: 1, deviceId: DEVICE_A });
+    expect(next.state.folders[FOLDER_F].parentId).toEqual({
+      value: null,
+      stamp: { counter: 1, deviceId: DEVICE_A },
+    });
 
     // 重复使用同 UUID（即使同名）拒绝
     expect(() =>
@@ -380,5 +391,140 @@ describe("validation & serialization boundary", () => {
     });
     expect(valid.books[HASH_H1].favorite?.value).toBe(false);
     expect(valid.books[HASH_H1].folderId?.value).toBeNull();
+  });
+});
+
+describe("nested folder projection and local placement", () => {
+  const F1 = "00000000-0000-4000-8000-000000000101";
+  const F2 = "00000000-0000-4000-8000-000000000102";
+  const F3 = "00000000-0000-4000-8000-000000000103";
+  const F4 = "00000000-0000-4000-8000-000000000104";
+  const F5 = "00000000-0000-4000-8000-000000000105";
+  const F6 = "00000000-0000-4000-8000-000000000106";
+  const F7 = "00000000-0000-4000-8000-000000000107";
+  const env = (): OrganizationEnvelope => ({ deviceId: DEVICE_A, counter: 0, state: emptyOrganization() });
+  const withParent = (id: string, parentId: string | null, counter: number): FolderState => ({
+    name: { value: id.slice(-3), stamp: stamp(counter, DEVICE_A) },
+    parentId: { value: parentId, stamp: stamp(counter, DEVICE_A) },
+  });
+  const rawState = (entries: Array<[string, FolderState]>): LibraryOrganization => ({
+    schemaVersion: 2,
+    folders: Object.fromEntries(entries),
+    books: {},
+  });
+
+  it("upgrades legacy v1 without inventing a parent event", () => {
+    const legacy = validateOrganization({
+      schemaVersion: 1,
+      folders: { [F1]: { name: { value: "旧夹", stamp: stamp(1, DEVICE_A) } } },
+      books: {},
+    });
+    expect(legacy.schemaVersion).toBe(2);
+    expect(legacy.folders[F1].parentId).toBeUndefined();
+    expect(effectiveFolderParent(legacy, F1)).toBeNull();
+    expect(effectiveFolderDepth(legacy, F1)).toBe(1);
+  });
+
+  it("creates and moves a five-level tree while retaining UUIDs and book ownership", () => {
+    let state = env();
+    for (const [id, parent, name] of [
+      [F1, null, "一"], [F2, F1, "二"], [F3, F2, "三"], [F4, F3, "四"], [F5, F4, "五"],
+    ] as const) {
+      state = applyCommand(state, { type: "createFolder", folderId: id, name, parentId: parent }, new Set());
+    }
+    expect(effectiveFolderParent(state.state, F5)).toBe(F4);
+    expect(effectiveFolderDepth(state.state, F5)).toBe(5);
+    expect(effectiveFolderAncestors(state.state, F5)).toEqual([F1, F2, F3, F4]);
+    expect(effectiveFolderChildren(state.state, F1)).toEqual([F2]);
+    expect(effectiveFolderDescendants(state.state, F1)).toEqual([F2, F3, F4, F5]);
+    expect(state.state.folders[F5].parentId?.value).toBe(F4);
+
+    state = applyCommand(state, { type: "moveFolder", folderId: F5, parentId: null }, new Set());
+    expect(effectiveFolderParent(state.state, F5)).toBeNull();
+    expect(effectiveFolderDepth(state.state, F5)).toBe(1);
+    expect(() =>
+      applyCommand(state, { type: "moveFolder", folderId: F1, parentId: F4 }, new Set()),
+    ).toThrow("文件夹层级不能形成环");
+    expect(() =>
+      applyCommand(state, { type: "moveFolder", folderId: F1, parentId: F1 }, new Set()),
+    ).toThrow("文件夹不能移动到自身");
+  });
+
+  it("rejects the sixth level on both create and move", () => {
+    let state = env();
+    for (const [id, parent, name] of [
+      [F1, null, "一"], [F2, F1, "二"], [F3, F2, "三"], [F4, F3, "四"], [F5, F4, "五"],
+    ] as const) {
+      state = applyCommand(state, { type: "createFolder", folderId: id, name, parentId: parent }, new Set());
+    }
+    expect(() =>
+      applyCommand(state, { type: "createFolder", folderId: F6, name: "六", parentId: F5 }, new Set()),
+    ).toThrow(`文件夹层级不能超过 ${MAX_FOLDER_DEPTH} 层`);
+
+    state = applyCommand(state, { type: "createFolder", folderId: F7, name: "七", parentId: null }, new Set());
+    // Moving the five-level subtree under another root would make F5 depth six.
+    expect(() =>
+      applyCommand(state, { type: "moveFolder", folderId: F1, parentId: F7 }, new Set()),
+    ).toThrow(`文件夹层级不能超过 ${MAX_FOLDER_DEPTH} 层`);
+  });
+
+  it("breaks concurrent cycles at the smallest UUID and promotes deleted children", () => {
+    const cycle = rawState([
+      [F2, withParent(F2, F1, 2)],
+      [F1, withParent(F1, F2, 1)],
+      [F3, withParent(F3, F1, 3)],
+    ]);
+    expect(effectiveFolderParent(cycle, F1)).toBeNull();
+    expect(effectiveFolderParent(cycle, F2)).toBe(F1);
+    expect(effectiveFolderParent(cycle, F3)).toBe(F1);
+    expect(effectiveFolderDepth(cycle, F2)).toBe(2);
+
+    const promoted: LibraryOrganization = {
+      schemaVersion: 2,
+      folders: Object.fromEntries([
+        [F1, withParent(F1, null, 1)],
+        [F2, { ...withParent(F2, F1, 2), deleted: stamp(4, DEVICE_A) }],
+        [F3, withParent(F3, F2, 3)],
+      ]),
+      books: { [HASH_H1]: bookFolder(F2, 5, DEVICE_A) },
+    };
+    expect(effectiveFolderId(promoted, HASH_H1)).toBe(F1);
+    expect(effectiveFolderParent(promoted, F3)).toBe(F1);
+    expect(effectiveFolderAncestors(promoted, F3)).toEqual([F1]);
+
+    const deletedLoop: LibraryOrganization = {
+      schemaVersion: 2,
+      folders: {
+        [F1]: { ...withParent(F1, F1, 1), deleted: stamp(2, DEVICE_A) },
+      },
+      books: { [HASH_H1]: bookFolder(F1, 3, DEVICE_A) },
+    };
+    expect(effectiveFolderId(deletedLoop, HASH_H1)).toBeNull();
+  });
+
+  it("merges parent registers by stamp and includes them in the local clock", () => {
+    const a = rawState([[F1, withParent(F1, null, 5)]]);
+    const b = rawState([[F1, withParent(F1, F2, 5)]]);
+    expect(() => mergeOrganization(a, b)).toThrow(STAMP_COLLISION);
+    const merged = mergeOrganization(a, rawState([[F2, withParent(F2, null, 9)]]));
+    expect(merged.folders[F1].parentId?.value).toBeNull();
+    expect(maxObservedCounter(merged)).toBe(9);
+  });
+
+  it("clamps remotely merged depth beyond five without writing a repair event", () => {
+    const deep = rawState([
+      [F1, withParent(F1, null, 1)],
+      [F2, withParent(F2, F1, 2)],
+      [F3, withParent(F3, F2, 3)],
+      [F4, withParent(F4, F3, 4)],
+      [F5, withParent(F5, F4, 5)],
+      [F6, withParent(F6, F5, 6)],
+      [F7, withParent(F7, F6, 7)],
+    ]);
+    expect(effectiveFolderDepth(deep, F6)).toBe(5);
+    expect(effectiveFolderDepth(deep, F7)).toBe(5);
+    expect(effectiveFolderParent(deep, F6)).toBe(F5);
+    expect(effectiveFolderParent(deep, F7)).toBe(F5);
+    expect(deep.folders[F7].parentId?.value).toBe(F6);
   });
 });

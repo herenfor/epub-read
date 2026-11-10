@@ -30,10 +30,10 @@ describe("highlight schema compatibility", () => {
       for (const old of [3, 4, 5]) expect(() => parsePortableStateV3({ ...input, schemaVersion: old })).toThrow();
       expect(parsePortableStateV3(JSON.parse(JSON.stringify(input))).books[hash].notes[noteId].versions[0].value).toEqual(value);
     }
-    expect(() => parsePortableStateV3({ ...state(), schemaVersion: 8 })).toThrow();
+    expect(parsePortableStateV3({ ...state(), schemaVersion: 8 }).schemaVersion).toBe(8);
   });
 
-  it("keeps v6 for concurrent values and drops the portable requirement after a valid deletion", () => {
+  it("keeps the v6 capability but carries nested organization data at v8", () => {
     const input = state({ ...note, content: "", style: "highlight", color: "yellow" });
     const old = state();
     const ordinary = old.books[hash].notes[noteId].versions[0];
@@ -41,9 +41,9 @@ describe("highlight schema compatibility", () => {
       versions: [{ ...ordinary, stamp: { deviceId: noteId, counter: 1 }, clock: { [noteId]: 1 } }],
     } } } } };
     const merged = mergePortableState(input, concurrent);
-    expect(merged.schemaVersion).toBe(6);
+    expect(merged.schemaVersion).toBe(8);
     expect(merged.books[hash].notes[noteId].versions).toHaveLength(2);
-    expect(parsePortableStateV3(merged).schemaVersion).toBe(6);
+    expect(parsePortableStateV3(merged).schemaVersion).toBe(8);
     const deleted = { ...merged, books: { [hash]: { ...merged.books[hash], notes: {
       [noteId]: { versions: [], deleted: { deviceId: device, counter: 2 } },
     } } } };

@@ -194,7 +194,10 @@ pub(crate) fn select_export_state(
                 .as_ref()
                 .and_then(|register| register.value.as_ref())
             {
-                folder_ids.insert(folder_id.clone());
+                folder_ids.extend(crate::library_organization::folder_stored_lineage(
+                    &snapshot.organization,
+                    folder_id,
+                ));
             }
         }
     }
@@ -768,23 +771,26 @@ pub(crate) fn validate_and_extract_with_expectation(
                     "选书存档包含范围外的书籍组织资料",
                 ));
             }
-            let referenced_folders: BTreeSet<&String> = incoming
-                .organization
-                .books
-                .values()
-                .filter_map(|book| {
-                    book.folder_id
-                        .as_ref()
-                        .and_then(|register| register.value.as_ref())
-                })
-                .collect();
+            let mut allowed_folders: BTreeSet<String> = BTreeSet::new();
+            for folder_id in incoming.organization.books.values().filter_map(|book| {
+                book.folder_id
+                    .as_ref()
+                    .and_then(|register| register.value.as_ref())
+            }) {
+                allowed_folders.extend(crate::library_organization::folder_stored_lineage(
+                    &incoming.organization,
+                    folder_id,
+                ));
+            }
             if incoming
                 .organization
                 .folders
                 .keys()
-                .any(|id| !referenced_folders.contains(id))
+                .any(|id| !allowed_folders.contains(id))
             {
-                return Err(SaveFileError::invalid_data("选书存档包含范围外的文件夹"));
+                return Err(SaveFileError::invalid_data(
+                    "选书存档包含范围外或缺少祖先的文件夹",
+                ));
             }
         }
         "all" => {}
@@ -1270,7 +1276,7 @@ mod tests {
             (
                 "new-schema",
                 1_u32,
-                8_u64,
+                9_u64,
                 true,
                 "需要较新版本",
                 Some("不支持此存档格式"),
@@ -1348,14 +1354,29 @@ mod tests {
     #[test]
     fn select_export_state_keeps_folder_relationships_without_a_second_wire() {
         let mut state = test_state();
+        let parent = "11111111-0000-4000-8000-000000000000";
         let referenced = "11111111-0000-4000-8000-000000000001";
         let unrelated = "22222222-0000-4000-8000-000000000002";
         state.organization = serde_json::from_value(json!({
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "folders": {
                 referenced: {
                     "name": {
                         "value": "已引用夹",
+                        "stamp": { "deviceId": A, "counter": 1 }
+                    },
+                    "parentId": {
+                        "value": parent,
+                        "stamp": { "deviceId": A, "counter": 1 }
+                    }
+                },
+                parent: {
+                    "name": {
+                        "value": "必要祖先",
+                        "stamp": { "deviceId": A, "counter": 1 }
+                    },
+                    "parentId": {
+                        "value": null,
                         "stamp": { "deviceId": A, "counter": 1 }
                     }
                 },
@@ -1379,7 +1400,8 @@ mod tests {
 
         let (all, all_hashes) = select_export_state(&state, &SaveExportScope::All).unwrap();
         assert_eq!(all_hashes, vec![HASH.to_string()]);
-        assert_eq!(all.organization.folders.len(), 2);
+        assert_eq!(all.organization.folders.len(), 3);
+        assert!(all.organization.folders.contains_key(parent));
         assert!(all.organization.folders.contains_key(referenced));
         assert!(all.organization.folders.contains_key(unrelated));
         assert_eq!(
@@ -1400,7 +1422,8 @@ mod tests {
         assert_eq!(selected_hashes, vec![HASH.to_string()]);
         assert_eq!(selected.books.len(), 1);
         assert_eq!(selected.organization.books.len(), 1);
-        assert_eq!(selected.organization.folders.len(), 1);
+        assert_eq!(selected.organization.folders.len(), 2);
+        assert!(selected.organization.folders.contains_key(parent));
         assert!(selected.organization.folders.contains_key(referenced));
         assert!(!selected.organization.folders.contains_key(unrelated));
     }

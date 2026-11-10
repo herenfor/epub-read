@@ -333,14 +333,15 @@ pub fn merge_portable_states(
             }
         }
     }
+    let organization = crate::library_organization::merge_organization(
+        &left.organization,
+        &right.organization,
+    )
+    .map_err(PortableError::invalid_data)?;
     Ok(PortableStateV3 {
-        schema_version: super::dto::source_schema_version(&books),
+        schema_version: super::dto::portable_schema_version(&books, &organization),
         books,
-        organization: crate::library_organization::merge_organization(
-            &left.organization,
-            &right.organization,
-        )
-        .map_err(PortableError::invalid_data)?,
+        organization,
         // Preferences have no merge clock in v3.  Keep the local explicit
         // choice; only a fresh repository adopts an incoming preference set.
         preferences: match (&left.preferences, &right.preferences) {

@@ -1,4 +1,4 @@
-//! Portable favorites / single-level folder organization.
+//! Portable favorites / nested folder organization.
 //!
 //! This module is pure data plus merge, clock and command reduction: it has no
 //! Tauri or filesystem dependency so the same rules can be reused by another
@@ -7,9 +7,10 @@
 //! already came from the IPC boundary or from that file.
 //!
 //! A book's identity is the full EPUB content SHA-256 and each book has at most
-//! one `folderId` register.  Favorites are an independent register.  Folder
-//! deletion is a permanent tombstone: the raw book references are kept and the
-//! view projection hides them instead of rewriting them to `null`.
+//! one `folderId` register.  Favorites are an independent register.  Folders
+//! form a tree through a stamped `parentId` register (max five levels).  Folder
+//! deletion is a permanent tombstone: raw book/folder references are kept and
+//! the view projection lifts children/books to the nearest live ancestor.
 
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -18,7 +19,9 @@ use std::collections::{BTreeMap, HashSet};
 /// JS `Number.MAX_SAFE_INTEGER`; the logical clock must stay in this range.
 pub const MAX_SAFE_COUNTER: u64 = 9_007_199_254_740_991;
 pub const MAX_FOLDER_NAME_CODE_POINTS: usize = 40;
-pub const ORGANIZATION_SCHEMA_VERSION: u8 = 1;
+pub const ORGANIZATION_SCHEMA_VERSION: u8 = 2;
+pub const ORGANIZATION_LEGACY_SCHEMA_VERSION: u8 = 1;
+pub const MAX_FOLDER_DEPTH: usize = 5;
 
 const STAMP_COLLISION: &str = "收藏与文件夹数据冲突：同一字段的同一事件出现不同取值";
 const CLOCK_EXHAUSTED: &str = "本机逻辑时钟已达上限，无法继续保存收藏与文件夹";
@@ -67,6 +70,14 @@ pub struct Register<T> {
 #[serde(rename_all = "camelCase")]
 pub struct FolderState {
     pub name: Register<String>,
+    /// Parent relationship.  Missing means historical single-level data (root);
+    /// new root events are an explicit `value: null`.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present"
+    )]
+    pub parent_id: Option<Register<Option<String>>>,
     /// Permanent deletion marker; the same UUID can never be revived.
     #[serde(
         default,
@@ -121,6 +132,15 @@ pub enum OrganizationCommand {
     CreateFolder {
         folder_id: String,
         name: String,
+        /// Omitted or explicit null both mean the root for this create command.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent_id: Option<String>,
+    },
+    MoveFolder {
+        folder_id: String,
+        /// Must appear: null explicitly moves the folder to the root.
+        #[serde(deserialize_with = "deserialize_required")]
+        parent_id: Option<String>,
     },
     RenameFolder {
         folder_id: String,
@@ -259,6 +279,7 @@ fn merge_deletion(a: Option<&Stamp>, b: Option<&Stamp>) -> Option<Stamp> {
 fn merge_folder(a: &FolderState, b: &FolderState) -> Result<FolderState, String> {
     Ok(FolderState {
         name: merge_register(Some(&a.name), Some(&b.name))?.expect("folder names are required"),
+        parent_id: merge_register(a.parent_id.as_ref(), b.parent_id.as_ref())?,
         deleted: merge_deletion(a.deleted.as_ref(), b.deleted.as_ref()),
     })
 }
@@ -316,6 +337,7 @@ pub fn max_observed_counter(state: &LibraryOrganization) -> u64 {
     };
     for folder in state.folders.values() {
         observe(Some(&folder.name.stamp));
+        observe(folder.parent_id.as_ref().map(|register| &register.stamp));
         observe(folder.deleted.as_ref());
     }
     for book in state.books.values() {
@@ -352,12 +374,171 @@ pub fn merge_into_envelope(
     })
 }
 
-/// View projection only: unknown or deleted folders appear as unclassified,
-/// while the raw reference is preserved.
+/// Deterministic effective parent/depth/children projection shared with TS.
 ///
-/// The Rust commands never rewrite book references from this projection; it
-/// exists to keep the projection rule identical to the TS core and is covered
-/// by the shared fixtures.
+/// Missing or deleted ancestors are skipped; live cycles are broken at the
+/// lexicographically smallest UUID in each cycle; depth beyond five is clamped
+/// to the fifth-level ancestor for display.  Raw registers are never rewritten.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FolderTreeProjection {
+    pub parent_by_id: BTreeMap<String, Option<String>>,
+    pub depth_by_id: BTreeMap<String, usize>,
+    pub unclamped_depth_by_id: BTreeMap<String, usize>,
+    pub children_by_parent: BTreeMap<Option<String>, Vec<String>>,
+}
+
+fn parent_value(folder: &FolderState) -> Option<&str> {
+    folder
+        .parent_id
+        .as_ref()
+        .and_then(|register| register.value.as_deref())
+}
+
+fn live_ancestor_of(state: &LibraryOrganization, start: &str) -> Option<String> {
+    let mut seen = std::collections::BTreeSet::new();
+    seen.insert(start.to_string());
+    let mut current = state.folders.get(start).and_then(parent_value).map(str::to_string);
+    while let Some(id) = current {
+        if !seen.insert(id.clone()) {
+            return (id == start).then_some(id);
+        }
+        let folder = state.folders.get(&id)?;
+        if folder.deleted.is_none() {
+            return Some(id);
+        }
+        current = parent_value(folder).map(str::to_string);
+    }
+    None
+}
+
+pub fn project_folder_tree(state: &LibraryOrganization) -> FolderTreeProjection {
+    let mut live_ids: Vec<String> = state
+        .folders
+        .iter()
+        .filter(|(_, folder)| folder.deleted.is_none())
+        .map(|(id, _)| id.clone())
+        .collect();
+    live_ids.sort();
+    let live: std::collections::BTreeSet<&str> = live_ids.iter().map(String::as_str).collect();
+
+    let next_live: BTreeMap<String, Option<String>> = live_ids
+        .iter()
+        .map(|id| (id.clone(), live_ancestor_of(state, id)))
+        .collect();
+
+    // Break each functional-graph cycle at its smallest UUID.
+    let mut cycle_roots = std::collections::BTreeSet::new();
+    let mut color: BTreeMap<String, u8> = BTreeMap::new();
+    for start in &live_ids {
+        if color.get(start).copied().unwrap_or(0) != 0 {
+            continue;
+        }
+        let mut path: Vec<String> = Vec::new();
+        let mut position: BTreeMap<String, usize> = BTreeMap::new();
+        let mut cursor = Some(start.clone());
+        while let Some(id) = cursor.clone() {
+            if !live.contains(id.as_str()) {
+                break;
+            }
+            match color.get(&id).copied().unwrap_or(0) {
+                2 => break,
+                1 => {
+                    if let Some(index) = position.get(&id) {
+                        let root = path[*index..]
+                            .iter()
+                            .min()
+                            .expect("cycle path is non-empty")
+                            .clone();
+                        cycle_roots.insert(root);
+                    }
+                    break;
+                }
+                _ => {}
+            }
+            color.insert(id.clone(), 1);
+            position.insert(id.clone(), path.len());
+            path.push(id.clone());
+            cursor = next_live.get(&id).cloned().flatten();
+        }
+        for id in path {
+            color.insert(id, 2);
+        }
+    }
+
+    let mut base_parent: BTreeMap<String, Option<String>> = BTreeMap::new();
+    for id in &live_ids {
+        let parent = if cycle_roots.contains(id) {
+            None
+        } else {
+            next_live.get(id).cloned().flatten()
+        };
+        base_parent.insert(id.clone(), parent);
+    }
+
+    let mut base_depth: BTreeMap<String, usize> = BTreeMap::new();
+    for id in &live_ids {
+        if base_depth.contains_key(id) {
+            continue;
+        }
+        let mut path = Vec::new();
+        let mut cursor = Some(id.clone());
+        while let Some(node) = cursor.clone() {
+            if base_depth.contains_key(&node) {
+                break;
+            }
+            path.push(node.clone());
+            cursor = base_parent.get(&node).cloned().flatten();
+        }
+        let mut depth = cursor
+            .as_ref()
+            .and_then(|node| base_depth.get(node).copied())
+            .unwrap_or(0);
+        for node in path.iter().rev() {
+            depth += 1;
+            base_depth.insert(node.clone(), depth);
+        }
+    }
+
+    let mut parent_by_id = BTreeMap::new();
+    let mut depth_by_id = BTreeMap::new();
+    for id in &live_ids {
+        let depth = *base_depth.get(id).expect("every live folder has a depth");
+        if depth <= MAX_FOLDER_DEPTH {
+            parent_by_id.insert(id.clone(), base_parent.get(id).cloned().flatten());
+            depth_by_id.insert(id.clone(), depth);
+        } else {
+            let mut cursor = id.clone();
+            while base_depth.get(&cursor).copied().unwrap_or(1) > MAX_FOLDER_DEPTH {
+                cursor = base_parent
+                    .get(&cursor)
+                    .cloned()
+                    .flatten()
+                    .expect("a node deeper than five has an ancestor");
+            }
+            parent_by_id.insert(id.clone(), Some(cursor));
+            depth_by_id.insert(id.clone(), MAX_FOLDER_DEPTH);
+        }
+    }
+
+    let mut children_by_parent: BTreeMap<Option<String>, Vec<String>> = BTreeMap::new();
+    for id in &live_ids {
+        let parent = parent_by_id.get(id).cloned().flatten();
+        children_by_parent.entry(parent).or_default().push(id.clone());
+    }
+    for children in children_by_parent.values_mut() {
+        children.sort();
+    }
+
+    FolderTreeProjection {
+        parent_by_id,
+        depth_by_id,
+        unclamped_depth_by_id: base_depth,
+        children_by_parent,
+    }
+}
+
+/// View projection only: hidden/unknown folders lift to their nearest live
+/// ancestor while the raw reference is preserved.
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn effective_folder_id<'a>(
     state: &'a LibraryOrganization,
@@ -371,9 +552,126 @@ pub fn effective_folder_id<'a>(
         .value
         .as_deref()?;
     match state.folders.get(folder_id) {
-        Some(folder) if folder.deleted.is_none() => Some(folder_id),
-        _ => None,
+        Some(folder) if folder.deleted.is_none() => {
+            state.folders.get_key_value(folder_id).map(|(id, _)| id.as_str())
+        }
+        Some(_) => {
+            let promoted = live_ancestor_of(state, folder_id)?;
+            match state.folders.get(&promoted) {
+                Some(folder) if folder.deleted.is_none() => state
+                    .folders
+                    .get_key_value(&promoted)
+                    .map(|(id, _)| id.as_str()),
+                _ => None,
+            }
+        }
+        None => None,
     }
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn effective_folder_parent(state: &LibraryOrganization, folder_id: &str) -> Option<String> {
+    if state
+        .folders
+        .get(folder_id)
+        .is_none_or(|folder| folder.deleted.is_some())
+    {
+        return None;
+    }
+    project_folder_tree(state)
+        .parent_by_id
+        .get(folder_id)
+        .cloned()
+        .flatten()
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn effective_folder_depth(state: &LibraryOrganization, folder_id: &str) -> Option<usize> {
+    if state
+        .folders
+        .get(folder_id)
+        .is_none_or(|folder| folder.deleted.is_some())
+    {
+        return None;
+    }
+    project_folder_tree(state).depth_by_id.get(folder_id).copied()
+}
+
+/// Root-first effective ancestors, excluding the folder itself.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn effective_folder_ancestors(state: &LibraryOrganization, folder_id: &str) -> Vec<String> {
+    let projection = project_folder_tree(state);
+    if !projection.depth_by_id.contains_key(folder_id) {
+        return Vec::new();
+    }
+    let mut result = Vec::new();
+    let mut current = projection.parent_by_id.get(folder_id).cloned().flatten();
+    while let Some(id) = current {
+        result.push(id.clone());
+        current = projection.parent_by_id.get(&id).cloned().flatten();
+    }
+    result.reverse();
+    result
+}
+
+/// Effective direct children, ASCII sorted; deleted folders never appear.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn effective_folder_children(
+    state: &LibraryOrganization,
+    parent_id: Option<&str>,
+) -> Vec<String> {
+    if let Some(id) = parent_id {
+        if state
+            .folders
+            .get(id)
+            .is_none_or(|folder| folder.deleted.is_some())
+        {
+            return Vec::new();
+        }
+    }
+    let key = parent_id.map(str::to_string);
+    project_folder_tree(state)
+        .children_by_parent
+        .get(&key)
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// All effective descendants (not including the folder), ASCII sorted.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn effective_folder_descendants(state: &LibraryOrganization, folder_id: &str) -> Vec<String> {
+    if effective_folder_depth(state, folder_id).is_none() {
+        return Vec::new();
+    }
+    let mut result = std::collections::BTreeSet::new();
+    let mut pending = effective_folder_children(state, Some(folder_id));
+    while let Some(id) = pending.pop() {
+        if !result.insert(id.clone()) {
+            continue;
+        }
+        pending.extend(effective_folder_children(state, Some(&id)));
+    }
+    result.into_iter().collect()
+}
+
+/// Stored lineage for export/import selection: [folder, parent, ...].  Deleted
+/// ancestors are included because they are needed to preserve the placement.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn folder_stored_lineage(state: &LibraryOrganization, folder_id: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut current = Some(folder_id.to_string());
+    while let Some(id) = current {
+        if !seen.insert(id.clone()) {
+            break;
+        }
+        let Some(folder) = state.folders.get(&id) else {
+            break;
+        };
+        result.push(id.clone());
+        current = parent_value(folder).map(str::to_string);
+    }
+    result
 }
 
 /// Same projection rule as `effective_folder_id`: a missing register means not
@@ -391,12 +689,15 @@ pub fn is_favorite(state: &LibraryOrganization, content_hash: &str) -> bool {
 /// Boundary validation for data read from the organization file or received as
 /// an archive merge input.
 pub fn validate_organization(state: &LibraryOrganization) -> Result<(), String> {
-    if state.schema_version != ORGANIZATION_SCHEMA_VERSION {
+    if state.schema_version != ORGANIZATION_LEGACY_SCHEMA_VERSION
+        && state.schema_version != ORGANIZATION_SCHEMA_VERSION
+    {
         return Err(format!(
             "收藏与文件夹数据版本不受支持：{}",
             state.schema_version
         ));
     }
+    let legacy = state.schema_version == ORGANIZATION_LEGACY_SCHEMA_VERSION;
     for (folder_id, folder) in &state.folders {
         if !valid_canonical_uuid(folder_id) {
             return Err("收藏与文件夹数据含有无效的文件夹 ID".into());
@@ -406,6 +707,19 @@ pub fn validate_organization(state: &LibraryOrganization) -> Result<(), String> 
         }
         if !valid_stamp(&folder.name.stamp) {
             return Err("收藏与文件夹数据含有无效的逻辑时钟".into());
+        }
+        if legacy && folder.parent_id.is_some() {
+            return Err("版本 1 的文件夹不能包含 parentId".into());
+        }
+        if let Some(register) = &folder.parent_id {
+            if !valid_stamp(&register.stamp) {
+                return Err("收藏与文件夹数据含有无效的逻辑时钟".into());
+            }
+            if let Some(target) = &register.value {
+                if !valid_canonical_uuid(target) {
+                    return Err("收藏与文件夹数据含有无效的文件夹 ID".into());
+                }
+            }
         }
         if let Some(deleted) = &folder.deleted {
             if !valid_stamp(deleted) {
@@ -436,6 +750,15 @@ pub fn validate_organization(state: &LibraryOrganization) -> Result<(), String> 
     Ok(())
 }
 
+/// Validate then upgrade the in-memory shape without inventing parent events.
+/// Legacy folders stay parentless (effective root); the next local write emits
+/// a stamped parent register.
+pub fn normalize_organization(mut state: LibraryOrganization) -> Result<LibraryOrganization, String> {
+    validate_organization(&state)?;
+    state.schema_version = ORGANIZATION_SCHEMA_VERSION;
+    Ok(state)
+}
+
 pub fn validate_envelope(envelope: &OrganizationEnvelope) -> Result<(), String> {
     if !valid_canonical_uuid(&envelope.device_id) {
         return Err("收藏与文件夹数据含有无效的本机设备 ID".into());
@@ -450,6 +773,15 @@ enum Mutation {
     PutFolder {
         folder_id: String,
         name: String,
+        parent_id: Option<String>,
+    },
+    RenameFolder {
+        folder_id: String,
+        name: String,
+    },
+    SetFolderParent {
+        folder_id: String,
+        parent_id: Option<String>,
     },
     MarkFolderDeleted {
         folder_id: String,
@@ -505,6 +837,126 @@ fn plan_folder_target(state: &LibraryOrganization, folder_id: &str) -> Result<()
     }
 }
 
+fn require_live_folder<'a>(
+    state: &'a LibraryOrganization,
+    folder_id: &str,
+    missing: &str,
+    deleted: &str,
+) -> Result<&'a FolderState, String> {
+    if !valid_canonical_uuid(folder_id) {
+        return Err("无效的文件夹 ID".into());
+    }
+    match state.folders.get(folder_id) {
+        Some(folder) if folder.deleted.is_none() => Ok(folder),
+        Some(_) => Err(deleted.into()),
+        None => Err(missing.into()),
+    }
+}
+
+fn stored_subtree_ids(state: &LibraryOrganization, root: &str) -> std::collections::BTreeSet<String> {
+    let mut children: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (id, folder) in &state.folders {
+        if let Some(parent) = parent_value(folder) {
+            children.entry(parent.to_string()).or_default().push(id.clone());
+        }
+    }
+    let mut result = std::collections::BTreeSet::new();
+    let mut pending = vec![root.to_string()];
+    while let Some(id) = pending.pop() {
+        if !result.insert(id.clone()) {
+            continue;
+        }
+        if let Some(next) = children.get(&id) {
+            pending.extend(next.iter().cloned());
+        }
+    }
+    result
+}
+
+fn assert_no_stored_cycle(
+    state: &LibraryOrganization,
+    folder_id: &str,
+    parent_id: &str,
+) -> Result<(), String> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut current = Some(parent_id.to_string());
+    while let Some(id) = current {
+        if id == folder_id {
+            return Err("文件夹层级不能形成环".into());
+        }
+        if !seen.insert(id.clone()) {
+            return Err("文件夹层级存在循环".into());
+        }
+        let Some(folder) = state.folders.get(&id) else {
+            break;
+        };
+        current = parent_value(folder).map(str::to_string);
+    }
+    Ok(())
+}
+
+/// Validate a local create/move target: no raw cycle, and every affected live
+/// folder stays within five unclamped levels.
+fn assert_folder_placement(
+    state: &LibraryOrganization,
+    folder_id: &str,
+    parent_id: Option<&str>,
+    creating: bool,
+) -> Result<(), String> {
+    let dummy_stamp = Stamp {
+        counter: 1,
+        device_id: "00000000-0000-4000-8000-000000000000".into(),
+    };
+    let mut candidate = state.clone();
+    if creating {
+        candidate.folders.insert(
+            folder_id.to_string(),
+            FolderState {
+                name: Register {
+                    value: "待校验".into(),
+                    stamp: dummy_stamp.clone(),
+                },
+                parent_id: Some(Register {
+                    value: parent_id.map(str::to_string),
+                    stamp: dummy_stamp,
+                }),
+                deleted: None,
+            },
+        );
+    } else {
+        candidate
+            .folders
+            .get_mut(folder_id)
+            .expect("move source exists")
+            .parent_id = Some(Register {
+            value: parent_id.map(str::to_string),
+            stamp: dummy_stamp,
+        });
+    }
+    if let Some(parent) = parent_id {
+        assert_no_stored_cycle(state, folder_id, parent)?;
+    }
+    let projection = project_folder_tree(&candidate);
+    let affected = if creating {
+        std::collections::BTreeSet::from([folder_id.to_string()])
+    } else {
+        stored_subtree_ids(state, folder_id)
+    };
+    for id in affected {
+        let Some(folder) = candidate.folders.get(&id) else {
+            continue;
+        };
+        if folder.deleted.is_some() {
+            continue;
+        }
+        match projection.unclamped_depth_by_id.get(&id) {
+            Some(depth) if *depth <= MAX_FOLDER_DEPTH => {}
+            _ => return Err(format!("文件夹层级不能超过 {MAX_FOLDER_DEPTH} 层")),
+        }
+    }
+    Ok(())
+}
+
 fn plan_command(
     state: &LibraryOrganization,
     command: &OrganizationCommand,
@@ -512,7 +964,11 @@ fn plan_command(
 ) -> Result<Vec<Mutation>, String> {
     let mut mutations = Vec::new();
     match command {
-        OrganizationCommand::CreateFolder { folder_id, name } => {
+        OrganizationCommand::CreateFolder {
+            folder_id,
+            name,
+            parent_id,
+        } => {
             if !valid_canonical_uuid(folder_id) {
                 return Err("无效的文件夹 ID".into());
             }
@@ -520,9 +976,31 @@ fn plan_command(
             if state.folders.contains_key(folder_id) {
                 return Err("该文件夹 ID 已被使用".into());
             }
+            if let Some(parent) = parent_id {
+                require_live_folder(state, parent, "父文件夹不存在", "父文件夹已解散")?;
+            }
+            assert_folder_placement(state, folder_id, parent_id.as_deref(), true)?;
             mutations.push(Mutation::PutFolder {
                 folder_id: folder_id.clone(),
                 name: normalize_folder_name(name)?,
+                parent_id: parent_id.clone(),
+            });
+        }
+        OrganizationCommand::MoveFolder {
+            folder_id,
+            parent_id,
+        } => {
+            require_live_folder(state, folder_id, "文件夹不存在", "文件夹已解散")?;
+            if parent_id.as_deref() == Some(folder_id.as_str()) {
+                return Err("文件夹不能移动到自身".into());
+            }
+            if let Some(parent) = parent_id {
+                require_live_folder(state, parent, "目标文件夹不存在", "目标文件夹已解散")?;
+            }
+            assert_folder_placement(state, folder_id, parent_id.as_deref(), false)?;
+            mutations.push(Mutation::SetFolderParent {
+                folder_id: folder_id.clone(),
+                parent_id: parent_id.clone(),
             });
         }
         OrganizationCommand::RenameFolder { folder_id, name } => {
@@ -534,7 +1012,7 @@ fn plan_command(
                 Some(_) => return Err("文件夹已解散".into()),
                 None => return Err("文件夹不存在".into()),
             }
-            mutations.push(Mutation::PutFolder {
+            mutations.push(Mutation::RenameFolder {
                 folder_id: folder_id.clone(),
                 name: normalize_folder_name(name)?,
             });
@@ -602,11 +1080,11 @@ pub fn apply_command(
     let mut state = envelope.state.clone();
     for mutation in mutations {
         match mutation {
-            Mutation::PutFolder { folder_id, name } => {
-                let deleted = state
-                    .folders
-                    .get(&folder_id)
-                    .and_then(|folder| folder.deleted.clone());
+            Mutation::PutFolder {
+                folder_id,
+                name,
+                parent_id,
+            } => {
                 state.folders.insert(
                     folder_id,
                     FolderState {
@@ -614,9 +1092,33 @@ pub fn apply_command(
                             value: name,
                             stamp: stamp.clone(),
                         },
-                        deleted,
+                        parent_id: Some(Register {
+                            // Root is an explicit stamped null.
+                            value: parent_id,
+                            stamp: stamp.clone(),
+                        }),
+                        deleted: None,
                     },
                 );
+            }
+            Mutation::RenameFolder { folder_id, name } => {
+                if let Some(folder) = state.folders.get_mut(&folder_id) {
+                    folder.name = Register {
+                        value: name,
+                        stamp: stamp.clone(),
+                    };
+                }
+            }
+            Mutation::SetFolderParent {
+                folder_id,
+                parent_id,
+            } => {
+                if let Some(folder) = state.folders.get_mut(&folder_id) {
+                    folder.parent_id = Some(Register {
+                        value: parent_id,
+                        stamp: stamp.clone(),
+                    });
+                }
             }
             Mutation::MarkFolderDeleted { folder_id } => {
                 if let Some(folder) = state.folders.get_mut(&folder_id) {
@@ -652,6 +1154,7 @@ pub fn apply_command(
             }
         }
     }
+    state.schema_version = ORGANIZATION_SCHEMA_VERSION;
     Ok(OrganizationEnvelope {
         device_id: envelope.device_id.clone(),
         counter: stamp.counter,
@@ -704,6 +1207,7 @@ mod tests {
     fn folder(name: &str, counter: u64, device_id: &str) -> FolderState {
         FolderState {
             name: reg(name.to_string(), counter, device_id),
+            parent_id: None,
             deleted: None,
         }
     }
@@ -767,6 +1271,71 @@ mod tests {
         // A missing field is not the same event as an explicit move to the root.
         let missing = format!(r#"{{"type":"moveBooks","contentHashes":["{HASH_H1}"]}}"#);
         assert!(serde_json::from_str::<OrganizationCommand>(&missing).is_err());
+    }
+
+    #[test]
+    fn nested_commands_and_parent_registers_keep_explicit_null_semantics() {
+        let create = format!(r#"{{"type":"createFolder","folderId":"{FOLDER_F}","name":"根"}}"#);
+        assert_eq!(
+            serde_json::from_str::<OrganizationCommand>(&create).unwrap(),
+            OrganizationCommand::CreateFolder {
+                folder_id: FOLDER_F.into(),
+                name: "根".into(),
+                parent_id: None,
+            }
+        );
+        let move_root =
+            format!(r#"{{"type":"moveFolder","folderId":"{FOLDER_F}","parentId":null}}"#);
+        assert_eq!(
+            serde_json::from_str::<OrganizationCommand>(&move_root).unwrap(),
+            OrganizationCommand::MoveFolder {
+                folder_id: FOLDER_F.into(),
+                parent_id: None,
+            }
+        );
+        let missing =
+            format!(r#"{{"type":"moveFolder","folderId":"{FOLDER_F}"}}"#);
+        assert!(serde_json::from_str::<OrganizationCommand>(&missing).is_err());
+
+        let register = format!(
+            r#"{{"value":null,"stamp":{{"counter":4,"deviceId":"{DEVICE_A}"}}}}"#
+        );
+        let folder: FolderState = serde_json::from_str(&format!(
+            r#"{{"name":{{"value":"根","stamp":{{"counter":1,"deviceId":"{DEVICE_A}"}}}},"parentId":{register}}}"#
+        ))
+        .unwrap();
+        assert_eq!(folder.parent_id.unwrap().value, None);
+        assert!(serde_json::from_str::<FolderState>(&format!(
+            r#"{{"name":{{"value":"根","stamp":{{"counter":1,"deviceId":"{DEVICE_A}"}}}},"parentId":null}}"#
+        ))
+        .is_err());
+    }
+
+    #[test]
+    fn legacy_parent_shape_and_future_versions_are_gated_at_validation() {
+        let mut legacy = state(vec![(FOLDER_F, folder("旧根", 1, DEVICE_A))], vec![]);
+        legacy.schema_version = ORGANIZATION_LEGACY_SCHEMA_VERSION;
+        assert!(validate_organization(&legacy).is_ok());
+        let normalized = normalize_organization(legacy.clone()).unwrap();
+        assert_eq!(normalized.schema_version, ORGANIZATION_SCHEMA_VERSION);
+        assert_eq!(normalized.folders[FOLDER_F].parent_id, None);
+
+        legacy.folders.get_mut(FOLDER_F).unwrap().parent_id =
+            Some(reg(Some(FOLDER_G.to_string()), 2, DEVICE_A));
+        assert!(validate_organization(&legacy).is_err());
+
+        let future = OrganizationEnvelope {
+            device_id: DEVICE_A.into(),
+            counter: 0,
+            state: frontend_future_state(),
+        };
+        assert!(validate_envelope(&future).is_err());
+    }
+
+    fn frontend_future_state() -> LibraryOrganization {
+        let mut state = state(vec![(FOLDER_F, folder("未来", 1, DEVICE_A))], vec![]);
+        state.schema_version = 3;
+        state
     }
 
     #[test]
@@ -1099,12 +1668,210 @@ mod tests {
     }
 
     #[test]
+    fn nested_folder_projection_breaks_cycles_and_promotes_deleted_children() {
+        let f1 = "00000000-0000-4000-8000-000000000101";
+        let f2 = "00000000-0000-4000-8000-000000000102";
+        let f3 = "00000000-0000-4000-8000-000000000103";
+        let with_parent = |name: &str, parent: Option<&str>, counter: u64| FolderState {
+            name: reg(name.to_string(), counter, DEVICE_A),
+            parent_id: Some(reg(parent.map(str::to_string), counter, DEVICE_A)),
+            deleted: None,
+        };
+
+        // f1 < f2, so the cycle is broken at f1 even though f2 is visited first.
+        let cycle = state(
+            vec![
+                (f2, with_parent("二", Some(f1), 2)),
+                (f1, with_parent("一", Some(f2), 1)),
+                (f3, with_parent("三", Some(f1), 3)),
+            ],
+            vec![],
+        );
+        assert_eq!(effective_folder_parent(&cycle, f1), None);
+        assert_eq!(effective_folder_parent(&cycle, f2), Some(f1.to_string()));
+        assert_eq!(effective_folder_parent(&cycle, f3), Some(f1.to_string()));
+        assert_eq!(effective_folder_depth(&cycle, f2), Some(2));
+
+        let mut promoted = state(
+            vec![
+                (f1, with_parent("一", None, 1)),
+                (f2, with_parent("二", Some(f1), 2)),
+                (f3, with_parent("三", Some(f2), 3)),
+            ],
+            vec![(HASH_H1, book_folder(Some(f2), 5, DEVICE_A))],
+        );
+        promoted.folders.get_mut(f2).unwrap().deleted = Some(stamp(4, DEVICE_A));
+        assert_eq!(effective_folder_id(&promoted, HASH_H1), Some(f1));
+        assert_eq!(effective_folder_parent(&promoted, f3), Some(f1.to_string()));
+        assert_eq!(effective_folder_ancestors(&promoted, f3), vec![f1.to_string()]);
+        assert_eq!(
+            promoted.books[HASH_H1]
+                .folder_id
+                .as_ref()
+                .unwrap()
+                .value
+                .as_deref(),
+            Some(f2)
+        );
+
+        let mut deleted_loop = state(
+            vec![(f1, with_parent("环", Some(f1), 1))],
+            vec![(HASH_H1, book_folder(Some(f1), 3, DEVICE_A))],
+        );
+        deleted_loop.folders.get_mut(f1).unwrap().deleted = Some(stamp(2, DEVICE_A));
+        assert_eq!(effective_folder_id(&deleted_loop, HASH_H1), None);
+    }
+
+    #[test]
+    fn parent_registers_merge_by_stamp_and_advance_the_local_clock() {
+        let a = state(
+            vec![(FOLDER_F, FolderState {
+                name: reg("A".into(), 1, DEVICE_A),
+                parent_id: Some(reg(None, 5, DEVICE_A)),
+                deleted: None,
+            })],
+            vec![],
+        );
+        let b = state(
+            vec![(FOLDER_F, FolderState {
+                name: reg("A".into(), 1, DEVICE_A),
+                parent_id: Some(reg(Some(FOLDER_G.to_string()), 5, DEVICE_A)),
+                deleted: None,
+            })],
+            vec![],
+        );
+        assert!(merge_organization(&a, &b).is_err());
+        let merged = merge_organization(&a, &state(vec![(FOLDER_G, folder("G", 9, DEVICE_A))], vec![])).unwrap();
+        assert_eq!(merged.folders[FOLDER_F].parent_id.as_ref().unwrap().value, None);
+        assert_eq!(max_observed_counter(&merged), 9);
+    }
+
+    #[test]
+    fn nested_create_move_enforce_five_levels_and_no_cycles() {
+        let ids = [
+            "00000000-0000-4000-8000-000000000201",
+            "00000000-0000-4000-8000-000000000202",
+            "00000000-0000-4000-8000-000000000203",
+            "00000000-0000-4000-8000-000000000204",
+            "00000000-0000-4000-8000-000000000205",
+            "00000000-0000-4000-8000-000000000206",
+        ];
+        let names = ["一", "二", "三", "四", "五", "六"];
+        let mut envelope = envelope(DEVICE_A, 0, empty_organization());
+        for index in 0..5 {
+            envelope = apply_command(
+                &envelope,
+                &OrganizationCommand::CreateFolder {
+                    folder_id: ids[index].into(),
+                    name: names[index].into(),
+                    parent_id: (index > 0).then(|| ids[index - 1].to_string()),
+                },
+                &HashSet::new(),
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            effective_folder_ancestors(&envelope.state, ids[4]),
+            ids[..4].iter().map(|id| id.to_string()).collect::<Vec<_>>()
+        );
+        assert_eq!(effective_folder_depth(&envelope.state, ids[4]), Some(5));
+        assert_eq!(
+            effective_folder_children(&envelope.state, Some(ids[0])),
+            vec![ids[1].to_string()]
+        );
+        assert_eq!(
+            effective_folder_descendants(&envelope.state, ids[0]),
+            ids[1..5].iter().map(|id| id.to_string()).collect::<Vec<_>>()
+        );
+
+        let sixth = OrganizationCommand::CreateFolder {
+            folder_id: ids[5].into(),
+            name: names[5].into(),
+            parent_id: Some(ids[4].into()),
+        };
+        assert!(apply_command(&envelope, &sixth, &HashSet::new())
+            .unwrap_err()
+            .contains("不能超过 5 层"));
+
+        envelope = apply_command(
+            &envelope,
+            &OrganizationCommand::MoveFolder {
+                folder_id: ids[4].into(),
+                parent_id: None,
+            },
+            &HashSet::new(),
+        )
+        .unwrap();
+        assert_eq!(effective_folder_depth(&envelope.state, ids[4]), Some(1));
+        let cycle = OrganizationCommand::MoveFolder {
+            folder_id: ids[0].into(),
+            parent_id: Some(ids[3].into()),
+        };
+        assert!(apply_command(&envelope, &cycle, &HashSet::new())
+            .unwrap_err()
+            .contains("形成环"));
+        let self_parent = OrganizationCommand::MoveFolder {
+            folder_id: ids[0].into(),
+            parent_id: Some(ids[0].into()),
+        };
+        assert!(apply_command(&envelope, &self_parent, &HashSet::new())
+            .unwrap_err()
+            .contains("自身"));
+    }
+
+    #[test]
+    fn nested_depth_clamps_for_remote_data_but_keeps_raw_parents() {
+        let ids = [
+            "00000000-0000-4000-8000-000000000301",
+            "00000000-0000-4000-8000-000000000302",
+            "00000000-0000-4000-8000-000000000303",
+            "00000000-0000-4000-8000-000000000304",
+            "00000000-0000-4000-8000-000000000305",
+            "00000000-0000-4000-8000-000000000306",
+            "00000000-0000-4000-8000-000000000307",
+        ];
+        let folders = ids
+            .iter()
+            .enumerate()
+            .map(|(index, id)| {
+                (
+                    *id,
+                    FolderState {
+                        name: reg(format!("夹{index}"), index as u64 + 1, DEVICE_A),
+                        parent_id: Some(reg(
+                            (index > 0).then(|| ids[index - 1].to_string()),
+                            index as u64 + 1,
+                            DEVICE_A,
+                        )),
+                        deleted: None,
+                    },
+                )
+            })
+            .collect();
+        let deep = state(folders, vec![]);
+        assert_eq!(effective_folder_depth(&deep, ids[5]), Some(5));
+        assert_eq!(effective_folder_depth(&deep, ids[6]), Some(5));
+        assert_eq!(effective_folder_parent(&deep, ids[5]), Some(ids[4].into()));
+        assert_eq!(effective_folder_parent(&deep, ids[6]), Some(ids[4].into()));
+        assert_eq!(
+            deep.folders[ids[6]]
+                .parent_id
+                .as_ref()
+                .unwrap()
+                .value
+                .as_deref(),
+            Some(ids[5])
+        );
+    }
+
+    #[test]
     fn folder_lifecycle_trims_names_and_keeps_permanent_tombstones() {
         let created = apply_command(
             &envelope(DEVICE_A, 0, empty_organization()),
             &OrganizationCommand::CreateFolder {
                 folder_id: FOLDER_F.into(),
                 name: "  科幻  ".into(),
+                parent_id: None,
             },
             &HashSet::new(),
         )
@@ -1114,6 +1881,10 @@ mod tests {
             created.state.folders[FOLDER_F].name.stamp,
             stamp(1, DEVICE_A)
         );
+        assert_eq!(
+            created.state.folders[FOLDER_F].parent_id.as_ref().unwrap().value,
+            None
+        );
         assert_eq!(created.counter, 1);
         // A used UUID cannot be created again, live or tombstoned.
         assert!(apply_command(
@@ -1121,6 +1892,7 @@ mod tests {
             &OrganizationCommand::CreateFolder {
                 folder_id: FOLDER_F.into(),
                 name: "另一个".into(),
+                parent_id: None,
             },
             &HashSet::new(),
         )
@@ -1168,6 +1940,7 @@ mod tests {
             &OrganizationCommand::CreateFolder {
                 folder_id: FOLDER_F.into(),
                 name: "复活".into(),
+                parent_id: None,
             },
             &HashSet::new(),
         )
@@ -1226,6 +1999,7 @@ mod tests {
             serde_json::to_string(&OrganizationCommand::CreateFolder {
                 folder_id: FOLDER_F.into(),
                 name: "科幻".into(),
+                parent_id: None,
             })
             .unwrap(),
             format!(r#"{{"type":"createFolder","folderId":"{FOLDER_F}","name":"科幻"}}"#)
@@ -1263,7 +2037,7 @@ mod tests {
         assert_eq!(
             json,
             format!(
-                r#"{{"deviceId":"{DEVICE_A}","counter":4,"state":{{"schemaVersion":1,"folders":{{"{FOLDER_F}":{{"name":{{"value":"科幻","stamp":{{"counter":1,"deviceId":"{DEVICE_A}"}}}}}}}},"books":{{"{HASH_H1}":{{"favorite":{{"value":false,"stamp":{{"counter":2,"deviceId":"{DEVICE_A}"}}}},"folderId":{{"value":null,"stamp":{{"counter":3,"deviceId":"{DEVICE_A}"}}}}}}}}}}}}"#
+                r#"{{"deviceId":"{DEVICE_A}","counter":4,"state":{{"schemaVersion":2,"folders":{{"{FOLDER_F}":{{"name":{{"value":"科幻","stamp":{{"counter":1,"deviceId":"{DEVICE_A}"}}}}}}}},"books":{{"{HASH_H1}":{{"favorite":{{"value":false,"stamp":{{"counter":2,"deviceId":"{DEVICE_A}"}}}},"folderId":{{"value":null,"stamp":{{"counter":3,"deviceId":"{DEVICE_A}"}}}}}}}}}}}}"#
             )
         );
         assert_eq!(
@@ -1290,7 +2064,7 @@ mod tests {
         assert!(validate_envelope(&envelope(DEVICE_A, 3, valid.clone())).is_ok());
 
         let mut wrong_version = valid.clone();
-        wrong_version.schema_version = 2;
+        wrong_version.schema_version = 3;
         assert!(validate_organization(&wrong_version).is_err());
 
         let uppercase_folder = state(

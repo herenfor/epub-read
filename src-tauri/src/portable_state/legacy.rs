@@ -424,9 +424,11 @@ fn parse_organization(root: &Path) -> PortableResult<OrganizationEnvelope> {
     let path = root.join("library-organization.json");
     match fs::read_to_string(&path) {
         Ok(text) => {
-            let envelope: OrganizationEnvelope = serde_json::from_str(&text)
+            let mut envelope: OrganizationEnvelope = serde_json::from_str(&text)
                 .map_err(|error| PortableError::invalid_data(format!("旧组织数据损坏：{error}")))?;
             validate_envelope(&envelope).map_err(PortableError::invalid_data)?;
+            envelope.state = crate::library_organization::normalize_organization(envelope.state)
+                .map_err(PortableError::invalid_data)?;
             Ok(envelope)
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(OrganizationEnvelope {
@@ -505,11 +507,13 @@ pub(crate) fn build_migration_plan(root: &Path) -> PortableResult<MigrationPlan>
     }
     let bindings = parse_bindings(root)?;
 
+    let organization_state = crate::library_organization::normalize_organization(organization.state)
+        .map_err(PortableError::invalid_data)?;
     Ok(MigrationPlan {
         state: PortableStateV3 {
-            schema_version: super::dto::source_schema_version(&books),
+            schema_version: super::dto::portable_schema_version(&books, &organization_state),
             books,
-            organization: organization.state,
+            organization: organization_state,
             preferences: None,
         },
         bindings,
@@ -573,7 +577,7 @@ pub(crate) fn build_import_state(
         }
     }
     Ok(PortableStateV3 {
-        schema_version: super::dto::source_schema_version(&books),
+        schema_version: super::dto::portable_schema_version(&books, organization),
         books,
         organization: organization.clone(),
         preferences: None,

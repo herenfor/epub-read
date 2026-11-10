@@ -831,8 +831,19 @@ pub(super) fn source_schema_version(books: &std::collections::BTreeMap<String, P
     if books.values().any(|book| matches!(crate::document_formats::extension(&book.metadata.value.file_name).to_ascii_lowercase().as_str(), "txt" | "cbz" | "zip")) { 4 } else { 3 }
 }
 
+pub(super) fn portable_schema_version(
+    books: &std::collections::BTreeMap<String, PortableBook>,
+    organization: &LibraryOrganization,
+) -> u64 {
+    if organization.schema_version == crate::library_organization::ORGANIZATION_SCHEMA_VERSION {
+        8
+    } else {
+        source_schema_version(books)
+    }
+}
+
 pub fn validate_portable_state(state: &PortableStateV3) -> PortableResult<()> {
-    if !matches!(state.schema_version, 3 | 4 | 5 | 6 | 7) {
+    if !matches!(state.schema_version, 3 | 4 | 5 | 6 | 7 | 8) {
         return Err(PortableError::invalid_data(
             "invalid-data：不支持的 portable schemaVersion",
         ));
@@ -855,18 +866,23 @@ pub fn validate_portable_state(state: &PortableStateV3) -> PortableResult<()> {
     Ok(())
 }
 
+pub fn normalize_portable_state(mut state: PortableStateV3) -> PortableResult<PortableStateV3> {
+    state.organization = crate::library_organization::normalize_organization(state.organization)
+        .map_err(PortableError::invalid_data)?;
+    validate_portable_state(&state)?;
+    Ok(state)
+}
+
 pub fn parse_portable_state_json(raw: &str) -> PortableResult<PortableStateV3> {
     let state: PortableStateV3 = serde_json::from_str(raw)
         .map_err(|error| PortableError::invalid_data(format!("invalid-data：{error}")))?;
-    validate_portable_state(&state)?;
-    Ok(state)
+    normalize_portable_state(state)
 }
 
 pub fn parse_portable_state_value(value: Value) -> PortableResult<PortableStateV3> {
     let state: PortableStateV3 = serde_json::from_value(value)
         .map_err(|error| PortableError::invalid_data(format!("invalid-data：{error}")))?;
-    validate_portable_state(&state)?;
-    Ok(state)
+    normalize_portable_state(state)
 }
 
 fn organization_object<'a>(
@@ -908,9 +924,14 @@ fn validate_organization_wire(value: &Value) -> PortableResult<()> {
         let folders = organization_object(folders, "organization.folders")?;
         for (folder_id, folder) in folders {
             let folder = organization_object(folder, &format!("folder {folder_id}"))?;
-            reject_unknown_keys(folder, &["name", "deleted"])?;
+            reject_unknown_keys(folder, &["name", "parentId", "deleted"])?;
             if let Some(name) = folder.get("name") {
                 validate_register_wire(name, "folder.name")?;
+            }
+            if let Some(parent_id) = folder.get("parentId") {
+                if !parent_id.is_null() {
+                    validate_register_wire(parent_id, "folder.parentId")?;
+                }
             }
             if let Some(deleted) = folder.get("deleted") {
                 if !deleted.is_null() {
@@ -1342,6 +1363,50 @@ mod note_highlight_contract_tests {
 
     fn parse(value: Value) -> NoteValue {
         serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn nested_organization_accepts_legacy_and_rejects_future_versions() {
+        let device = "00000000-0000-4000-8000-000000000001";
+        let folder = "00000000-0000-4000-8000-000000000010";
+        let legacy = json!({
+            "schemaVersion":7,
+            "books":{},
+            "organization":{"schemaVersion":1,"folders":{folder:{
+                "name":{"value":"旧根","stamp":{"deviceId":device,"counter":1}}
+            }},"books":{}}
+        });
+        let parsed = parse_portable_state_value(legacy).unwrap();
+        assert_eq!(parsed.schema_version, 7);
+        assert_eq!(parsed.organization.schema_version, 2);
+        assert_eq!(parsed.organization.folders[folder].parent_id, None);
+
+        let nested = json!({
+            "schemaVersion":8,
+            "books":{},
+            "organization":{"schemaVersion":2,"folders":{folder:{
+                "name":{"value":"新根","stamp":{"deviceId":device,"counter":1}},
+                "parentId":{"value":null,"stamp":{"deviceId":device,"counter":1}}
+            }},"books":{}}
+        });
+        let parsed = parse_portable_state_value(nested).unwrap();
+        assert_eq!(parsed.schema_version, 8);
+        assert_eq!(parsed.organization.folders[folder].parent_id.as_ref().unwrap().value, None);
+
+        let mut future_org = json!({
+            "schemaVersion":8,
+            "books":{},
+            "organization":{"schemaVersion":2,"folders":{},"books":{}}
+        });
+        future_org["organization"]["schemaVersion"] = json!(3);
+        assert!(parse_portable_state_value(future_org).is_err());
+        let mut future_state = json!({
+            "schemaVersion":8,
+            "books":{},
+            "organization":{"schemaVersion":2,"folders":{},"books":{}}
+        });
+        future_state["schemaVersion"] = json!(9);
+        assert!(parse_portable_state_value(future_state).is_err());
     }
 
     #[test]

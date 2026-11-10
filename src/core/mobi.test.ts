@@ -50,9 +50,10 @@ it("requires capability seven for MOBI/AZW3 and rejects older and unknown states
   const state = { schemaVersion: 7, books, organization: { schemaVersion: 1, books: {}, folders: {} } };
   expect(portableSchemaVersion(books)).toBe(7);
   expect(parsePortableStateV3(state).schemaVersion).toBe(7);
-  for (const schemaVersion of [3, 4, 5, 6, 8]) {
+  for (const schemaVersion of [3, 4, 5, 6]) {
     expect(() => parsePortableStateV3({ ...state, schemaVersion })).toThrow();
   }
+  expect(parsePortableStateV3({ ...state, schemaVersion: 8 }).schemaVersion).toBe(8);
   books[hash].metadata.value.fileName = "original.azw3";
   expect(portableSchemaVersion(books)).toBe(7);
   expect(parsePortableStateV3({ ...state, schemaVersion: 7 }).schemaVersion).toBe(7);

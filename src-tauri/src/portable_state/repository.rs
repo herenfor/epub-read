@@ -312,7 +312,11 @@ fn load_organization(connection: &Connection) -> PortableResult<LibraryOrganizat
         )
         .optional()?;
     match raw {
-        Some(raw) => parse_json(&raw, "organization"),
+        Some(raw) => {
+            let state: LibraryOrganization = parse_json(&raw, "organization")?;
+            crate::library_organization::normalize_organization(state)
+                .map_err(PortableError::invalid_data)
+        }
         None => Ok(empty_organization()),
     }
 }
@@ -562,10 +566,11 @@ fn load_state_at_connection(connection: &Connection) -> PortableResult<PortableS
             }
         }
     }
+    let organization = load_organization(connection)?;
     let state = PortableStateV3 {
-        schema_version: super::dto::source_schema_version(&books),
+        schema_version: super::dto::portable_schema_version(&books, &organization),
         books,
-        organization: load_organization(connection)?,
+        organization,
         preferences: load_meta_json(connection, KEY_PREFERENCES)?,
     };
     dto::validate_portable_state(&state)?;
@@ -1080,6 +1085,7 @@ impl PortableStore {
                 &OrganizationCommand::CreateFolder {
                     folder_id: create.folder_id.clone(),
                     name: create.name.clone(),
+                    parent_id: None,
                 },
                 &known_hashes,
             )
@@ -1838,6 +1844,8 @@ impl PortableStore {
         &mut self,
         incoming: &LibraryOrganization,
     ) -> PortableResult<LibraryOrganization> {
+        let incoming = crate::library_organization::normalize_organization(incoming.clone())
+            .map_err(PortableError::invalid_data)?;
         let transaction = self.connection.unchecked_transaction()?;
         let installation_id = ensure_installation_id(&transaction)?;
         let counter = load_counter(&transaction)?;
@@ -1847,7 +1855,7 @@ impl PortableStore {
             counter,
             state,
         };
-        let next = merge_into_envelope(&envelope, incoming)
+        let next = merge_into_envelope(&envelope, &incoming)
             .map_err(PortableError::invalid_data)?;
         store_organization(&transaction, &next.state)?;
         store_counter(&transaction, next.counter)?;
@@ -2535,6 +2543,63 @@ mod file_import_tests {
     const A: &str = "00000000-0000-4000-8000-000000000001";
 
     #[test]
+    fn high_organization_version_is_rejected_before_local_write() {
+        let mut store = PortableStore::open_in_memory().unwrap();
+        let folder = "00000000-0000-4000-8000-0000000000f9";
+        let high = serde_json::json!({
+            "schemaVersion": 3,
+            "folders": {
+                folder: {"name": {"value": "未来", "stamp": {"deviceId": A, "counter": 1}}}
+            },
+            "books": {}
+        });
+        let high_text = serde_json::to_string(&high).unwrap();
+        store.connection.execute(
+            "INSERT INTO organization(key, json) VALUES('state', ?1)",
+            [&high_text],
+        ).unwrap();
+        let error = store.apply_organization_command(&OrganizationCommand::CreateFolder {
+            folder_id: "00000000-0000-4000-8000-0000000000f8".into(),
+            name: "不应写入".into(),
+            parent_id: None,
+        }).unwrap_err();
+        assert_eq!(error.code, "invalid-data");
+        assert!(error.message.contains("版本"));
+        assert_eq!(
+            store.connection.query_row("SELECT json FROM organization WHERE key='state'", [], |row| row.get::<_, String>(0)).unwrap(),
+            high_text
+        );
+        assert_eq!(store.counter().unwrap(), 0);
+    }
+
+    #[test]
+    fn legacy_organization_is_upgraded_on_the_next_local_write() {
+        let mut store = PortableStore::open_in_memory().unwrap();
+        let legacy = serde_json::json!({
+            "schemaVersion": 1,
+            "folders": {},
+            "books": {}
+        });
+        store.connection.execute(
+            "INSERT INTO organization(key, json) VALUES('state', ?1)",
+            [serde_json::to_string(&legacy).unwrap()],
+        ).unwrap();
+        let folder = "00000000-0000-4000-8000-0000000000f7";
+        let updated = store.apply_organization_command(&OrganizationCommand::CreateFolder {
+            folder_id: folder.into(),
+            name: "根".into(),
+            parent_id: None,
+        }).unwrap();
+        assert_eq!(updated.schema_version, 2);
+        assert_eq!(updated.folders[folder].parent_id.as_ref().unwrap().value, None);
+        let stored: LibraryOrganization = serde_json::from_str(
+            &store.connection.query_row("SELECT json FROM organization WHERE key='state'", [], |row| row.get::<_, String>(0)).unwrap()
+        ).unwrap();
+        assert_eq!(stored.schema_version, 2);
+        assert_eq!(stored.folders[folder].parent_id.as_ref().unwrap().value, None);
+    }
+
+    #[test]
     fn c5_delete_purges_all_data_and_reimport_is_fresh() {
         let connection = Connection::open_in_memory().unwrap();
         connection.execute_batch(include_str!("testdata/local-schema-v1.sql")).unwrap();
@@ -2664,6 +2729,33 @@ mod file_import_tests {
         assert!(!merged.state.organization.folders.contains_key(unused));
         assert_eq!(merged.state.organization.folders[folder].name.value, "renamed");
         assert!(merged.state.organization.folders[folder].deleted.is_some());
+    }
+
+    #[test]
+    fn c6_accepting_a_book_also_keeps_its_folder_ancestor_chain() {
+        let parent = "00000000-0000-4000-8000-000000000020";
+        let child = "00000000-0000-4000-8000-000000000021";
+        let unrelated = "00000000-0000-4000-8000-000000000022";
+        let mut incoming = state_at(2);
+        incoming.organization = serde_json::from_value(serde_json::json!({
+            "schemaVersion":2,
+            "folders":{
+                parent:{"name":{"value":"父","stamp":{"deviceId":A,"counter":2}},"parentId":{"value":null,"stamp":{"deviceId":A,"counter":2}}},
+                child:{"name":{"value":"子","stamp":{"deviceId":A,"counter":2}},"parentId":{"value":parent,"stamp":{"deviceId":A,"counter":2}}},
+                unrelated:{"name":{"value":"旁支","stamp":{"deviceId":A,"counter":2}}}
+            },
+            "books":{HASH:{"folderId":{"value":child,"stamp":{"deviceId":A,"counter":2}}}}
+        })).unwrap();
+        let mut store = PortableStore::open_in_memory().unwrap();
+        let accepted = store.merge_local_import_ref(&incoming, vec![(HASH.into(), "{}".into())], &BTreeSet::new(), false).unwrap();
+        assert_eq!(accepted.state.organization.folders.len(), 2);
+        assert!(accepted.state.organization.folders.contains_key(parent));
+        assert!(accepted.state.organization.folders.contains_key(child));
+        assert!(!accepted.state.organization.folders.contains_key(unrelated));
+        assert_eq!(
+            accepted.state.organization.folders[child].parent_id.as_ref().unwrap().value.as_deref(),
+            Some(parent)
+        );
     }
 
     #[test]

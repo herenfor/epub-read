@@ -19,7 +19,9 @@ use std::path::Path;
 //    older clients must refuse these annotation values, never purge/rewrite them.
 // 7: MOBI/AZW3 source identities. 6 -> 7 backs up then marks only; a version 6
 //    client must refuse a 7 database rather than interpreting Kindle locations.
-const SCHEMA_VERSION: i64 = 7;
+// 8: nested folder parent relations. 7 -> 8 backs up then marks only; a 7 client
+//    must refuse an 8 database rather than dropping parentId and flattening.
+const SCHEMA_VERSION: i64 = 8;
 const DIRECTORY_TABLE: &str = "directory_bindings";
 const TABLES: &[(&str, &str)] = &[
     (
@@ -110,7 +112,7 @@ pub(super) fn initialize(connection: &mut Connection) -> PortableResult<()> {
     if !fresh
         && (!known
             || (objects.len() == TABLES.len() - 1 && has_directory)
-            || !matches!(version, 0 | 1 | 2 | 3 | 4 | 5 | 6 | SCHEMA_VERSION))
+            || !matches!(version, 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | SCHEMA_VERSION))
     {
         return Err(PortableError::unrecognized_database_format(
             "本机资料库结构无法识别，原资料已保留",
@@ -214,7 +216,7 @@ mod schema_version_tests {
 
     #[test]
     fn kindle_prior_versions_are_backed_up_without_purging_records() {
-        for prior_version in [2, 3, 4, 5, 6] {
+        for prior_version in [2, 3, 4, 5, 6, 7] {
         let db = TestDb::new();
         let connection = Connection::open(&db.0).unwrap();
         connection

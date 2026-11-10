@@ -117,7 +117,7 @@ export function mergePortableState(
     ? mergePreferences(local.preferences, incoming.preferences)
     : local.preferences;
   return {
-    schemaVersion: portableSchemaVersion(books),
+    schemaVersion: portableSchemaVersion(books, organization),
     books,
     organization,
     ...(preferences === undefined ? {} : { preferences }),

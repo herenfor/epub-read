@@ -217,7 +217,7 @@ function stateWithBooks(
   books: Record<string, PortableBook>,
   organization: LibraryOrganization,
 ): PortableStateV3 {
-  return { schemaVersion: portableSchemaVersion(books), books, organization };
+  return { schemaVersion: portableSchemaVersion(books, organization), books, organization };
 }
 
 function hasBook(state: PortableStateV3, hash: string | null): boolean {

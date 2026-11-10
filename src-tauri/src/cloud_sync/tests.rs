@@ -161,7 +161,8 @@ fn own_cloud_history_survives_cache_loss_local_delete_and_reimport() {
             "folderId": { "value": folder, "stamp": { "deviceId": A, "counter": 1 } }
         } }
     });
-    let state = parse_portable_state_value(value.clone()).unwrap();
+    let mut state = parse_portable_state_value(value.clone()).unwrap();
+    state.schema_version = 8;
     value["preferences"] = json!({ "theme": "dark", "fontSizePx": 22.0 });
     let with_preferences = parse_portable_state_value(value).unwrap();
     let own = file(A, with_preferences.clone());
@@ -384,16 +385,17 @@ fn conflicting_remote_event_does_not_discard_other_devices() {
 fn source_formats_cloud_preserves_state_four_and_reads_old_three() {
     let hash = "a".repeat(64);
     let old = file(A, book(A, &hash, 20));
-    assert_eq!(parse_device(&old, SPACE, A).unwrap().state_schema_version, 3);
+    assert_eq!(parse_device(&old, SPACE, A).unwrap().state_schema_version, 8);
     let mut state = book(A, &hash, 40);
     state.schema_version = 4;
     state.books.get_mut(&hash).unwrap().metadata.value.file_name = "原始编码.txt".into();
     let bytes = file(A, state.clone());
     let parsed = parse_device(&bytes, SPACE, A).unwrap();
-    assert_eq!(parsed.state_schema_version,4);
+    assert_eq!(parsed.state_schema_version,8);
+    state.schema_version = 8;
     assert_eq!(parsed.state,state);
     let mut future:serde_json::Value=serde_json::from_slice(&bytes).unwrap();
-    future["state"]["schemaVersion"]=json!(8);
+    future["state"]["schemaVersion"]=json!(9);
     assert_eq!(parse_device(&serde_json::to_vec(&future).unwrap(),SPACE,A).unwrap_err(),SyncError::UnsupportedSyncVersion);
 }
 
@@ -406,7 +408,8 @@ fn fb2_cloud_uses_state_five_without_changing_the_outer_format() {
     let bytes = file(A, state.clone());
     let parsed = parse_device(&bytes, SPACE, A).unwrap();
     assert_eq!(parsed.format_version, 2);
-    assert_eq!(parsed.state_schema_version, 5);
+    assert_eq!(parsed.state_schema_version, 8);
+    state.schema_version = 8;
     assert_eq!(parsed.state, state);
     let mut wrong: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     wrong["stateSchemaVersion"] = json!(4);
@@ -423,7 +426,8 @@ fn kindle_cloud_uses_state_seven_without_changing_the_outer_format() {
     let bytes = file(A, state.clone());
     let parsed = parse_device(&bytes, SPACE, A).unwrap();
     assert_eq!(parsed.format_version, 2);
-    assert_eq!(parsed.state_schema_version, 7);
+    assert_eq!(parsed.state_schema_version, 8);
+    state.schema_version = 8;
     assert_eq!(parsed.state, state);
     let mut wrong: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     wrong["stateSchemaVersion"] = json!(6);
@@ -446,7 +450,8 @@ fn highlight_cloud_uses_state_six_without_changing_the_outer_format() {
     let bytes = file(A, state.clone());
     let parsed = parse_device(&bytes, SPACE, A).unwrap();
     assert_eq!(parsed.format_version, 2);
-    assert_eq!(parsed.state_schema_version, 6);
+    assert_eq!(parsed.state_schema_version, 8);
+    state.schema_version = 8;
     assert_eq!(parsed.state, state);
     let mut wrong: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     wrong["stateSchemaVersion"] = json!(3);

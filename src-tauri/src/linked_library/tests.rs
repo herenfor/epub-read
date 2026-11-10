@@ -620,7 +620,7 @@
         assert_eq!(fs::read_to_string(&path).unwrap(), "{ not json");
         // An unknown schema version is corrupt data, not an empty organization.
         let wrong_version = format!(
-            r#"{{"deviceId":"{TEST_DEVICE_ID}","counter":0,"state":{{"schemaVersion":2,"folders":{{}},"books":{{}}}}}}"#
+            r#"{{"deviceId":"{TEST_DEVICE_ID}","counter":0,"state":{{"schemaVersion":3,"folders":{{}},"books":{{}}}}}}"#
         );
         fs::write(&path, &wrong_version).unwrap();
         assert!(load_organization_file(&path).is_err());
@@ -1916,6 +1916,7 @@
                         device_id: TEST_DEVICE_ID.to_string(),
                     },
                 },
+                parent_id: None,
                 deleted: None,
             },
         );

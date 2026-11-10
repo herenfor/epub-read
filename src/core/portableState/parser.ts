@@ -774,8 +774,8 @@ function parsePortableStateObject(raw: unknown, failures: PortableStateIssue[], 
   }
   checkFields(raw, "", ["schemaVersion", "books", "organization", "preferences"], failures, options);
   const schemaVersion = readOptional(raw, "schemaVersion");
-  if (schemaVersion !== PORTABLE_STATE_SCHEMA_VERSION && schemaVersion !== 4 && schemaVersion !== 5 && schemaVersion !== 6 && schemaVersion !== 7) {
-    fail(failures, "schemaVersion", "unsupported-schema-version", "portable state schemaVersion 3, 4, 5, 6 or 7 is required");
+  if (schemaVersion !== PORTABLE_STATE_SCHEMA_VERSION && schemaVersion !== 4 && schemaVersion !== 5 && schemaVersion !== 6 && schemaVersion !== 7 && schemaVersion !== 8) {
+    fail(failures, "schemaVersion", "unsupported-schema-version", "portable state schemaVersion 3, 4, 5, 6, 7 or 8 is required");
     return null;
   }
   const rawBooks = readOptional(raw, "books");
@@ -807,7 +807,7 @@ function parsePortableStateObject(raw: unknown, failures: PortableStateIssue[], 
   }
 
   const result: {
-    schemaVersion: 3 | 4 | 5 | 6 | 7;
+    schemaVersion: 3 | 4 | 5 | 6 | 7 | 8;
     books: Record<string, PortableBook>;
     organization: typeof organization;
     preferences?: PortablePreferences;

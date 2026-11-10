@@ -11,9 +11,10 @@ use super::*;
 pub(super) fn load_organization_file(path: &Path) -> Result<Option<OrganizationEnvelope>, String> {
     match fs::read_to_string(path) {
         Ok(text) => {
-            let envelope: OrganizationEnvelope = serde_json::from_str(&text)
+            let mut envelope: OrganizationEnvelope = serde_json::from_str(&text)
                 .map_err(|error| format!("收藏与文件夹数据损坏：{error}"))?;
             library_organization::validate_envelope(&envelope)?;
+            envelope.state = library_organization::normalize_organization(envelope.state)?;
             Ok(Some(envelope))
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -138,7 +139,7 @@ pub(super) fn merge_organization_command(
     app: &AppHandle,
     incoming: LibraryOrganization,
 ) -> Result<LibraryOrganization, String> {
-    library_organization::validate_organization(&incoming)?;
+    let incoming = library_organization::normalize_organization(incoming)?;
     let write_state = app.state::<LinkedLibraryWriteState>();
     let _guard = write_state
         .0

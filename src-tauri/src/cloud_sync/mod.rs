@@ -24,7 +24,7 @@ pub const DEVICE_FORMAT: &str = "epub-reader-sync-device";
 // v1 was an unpublished single-file prototype. Immutable generations are the
 // first usable transport, so old experimental writers must refuse this space.
 pub const FORMAT_VERSION: u64 = 2;
-pub const STATE_VERSION: u64 = 7;
+pub const STATE_VERSION: u64 = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -140,12 +140,19 @@ pub fn parse_device(
             value.get("state").and_then(|v| v.get("schemaVersion")),
             STATE_VERSION,
         )
+        || future_version(
+            value
+                .get("state")
+                .and_then(|v| v.get("organization"))
+                .and_then(|v| v.get("schemaVersion")),
+            2,
+        )
     {
         return Err(SyncError::UnsupportedSyncVersion);
     }
     let mut file: DeviceFile = serde_json::from_value(value).map_err(|_| SyncError::InvalidData)?;
     if file.format_version != FORMAT_VERSION
-        || !matches!(file.state_schema_version, 3 | 4 | 5 | 6 | 7)
+        || !matches!(file.state_schema_version, 3 | 4 | 5 | 6 | 7 | 8)
         || file.state_schema_version != file.state.schema_version
         || !valid_canonical_uuid(&file.space_id)
         || !valid_canonical_uuid(&file.installation_id)
@@ -259,7 +266,7 @@ impl Accumulator {
                     schema_version: STATE_VERSION,
                     books: BTreeMap::new(),
                     organization: crate::library_organization::LibraryOrganization {
-                        schema_version: 1,
+                        schema_version: 2,
                         folders: BTreeMap::new(),
                         books: BTreeMap::new(),
                     },

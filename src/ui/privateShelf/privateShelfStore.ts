@@ -163,7 +163,8 @@ export class PrivatePortableData implements PortableStateDataService {
       const book = await this.bookSnapshot(bookHash);
       if (book) books[bookHash] = book;
     }
-    return { schemaVersion: portableSchemaVersion(books), books, organization: projection.organization };
+    const organization = projection.organization;
+    return { schemaVersion: portableSchemaVersion(books, organization), books, organization };
   }
 
   async getOrganization(): Promise<LibraryOrganization> {

@@ -1,15 +1,18 @@
 /**
- * 收藏与单层文件夹管理核心模块。
+ * 收藏与多层文件夹管理核心模块。
  *
  * 纯逻辑与类型定义：不依赖 Tauri、DOM 或具体存储实现。
  * 书籍身份复用 EPUB 原始字节的 SHA-256（64 位小写十六进制字符串）。
  * 每本书最多归属一个文件夹（folderId 寄存器），收藏（favorite 寄存器）完全独立。
- * 文件夹删除使用永久 tombstone 标记，不批量清空书籍原始引用。
+ * 文件夹用带 stamp 的 parentId 寄存器组成最多五层的树；删除使用永久
+ * tombstone，显示投影跳过已删节点并把其子女/直属书提升到最近的存活祖先。
  */
 
 export const MAX_SAFE_COUNTER = 9_007_199_254_740_991; // Number.MAX_SAFE_INTEGER
 export const MAX_FOLDER_NAME_CODE_POINTS = 40;
-export const ORGANIZATION_SCHEMA_VERSION = 1 as const;
+export const ORGANIZATION_SCHEMA_VERSION = 2 as const;
+export const ORGANIZATION_LEGACY_SCHEMA_VERSION = 1 as const;
+export const MAX_FOLDER_DEPTH = 5;
 
 export const STAMP_COLLISION = "收藏与文件夹数据冲突：同一字段的同一事件出现不同取值";
 export const CLOCK_EXHAUSTED = "本机逻辑时钟已达上限，无法继续保存收藏与文件夹";
@@ -26,6 +29,8 @@ export interface Register<T> {
 
 export interface FolderState {
   readonly name: Register<string>;
+  /** 父关系；缺失按历史单层数据视为根。根的新事件写明确的 value: null。 */
+  readonly parentId?: Register<string | null>;
   /** 永久删除标记：同一 UUID 不允许复活。 */
   readonly deleted?: Stamp;
 }
@@ -36,7 +41,8 @@ export interface BookOrganization {
 }
 
 export interface LibraryOrganization {
-  readonly schemaVersion: 1;
+  /** 2 supports parentId; 1 is accepted only as legacy input and normalized on read. */
+  readonly schemaVersion: 1 | 2;
   readonly folders: Readonly<Record<string, FolderState>>;
   readonly books: Readonly<Record<string, BookOrganization>>;
 }
@@ -49,7 +55,8 @@ export interface OrganizationEnvelope {
 }
 
 export type OrganizationCommand =
-  | { readonly type: "createFolder"; readonly folderId: string; readonly name: string }
+  | { readonly type: "createFolder"; readonly folderId: string; readonly name: string; readonly parentId?: string | null }
+  | { readonly type: "moveFolder"; readonly folderId: string; readonly parentId: string | null }
   | { readonly type: "renameFolder"; readonly folderId: string; readonly name: string }
   | { readonly type: "deleteFolder"; readonly folderId: string }
   | { readonly type: "setFavorite"; readonly contentHashes: readonly string[]; readonly value: boolean }
@@ -62,7 +69,7 @@ export type ShelfScope =
   | { readonly type: "folder"; readonly folderId: string };
 
 export function emptyOrganization(): LibraryOrganization {
-  return { schemaVersion: 1, folders: {}, books: {} };
+  return { schemaVersion: ORGANIZATION_SCHEMA_VERSION, folders: {}, books: {} };
 }
 
 const CANONICAL_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -136,9 +143,11 @@ function mergeDeletion(a: Stamp | undefined, b: Stamp | undefined): Stamp | unde
 }
 
 function mergeFolder(a: FolderState, b: FolderState): FolderState {
+  const parentId = mergeRegister(a.parentId, b.parentId);
   const deleted = mergeDeletion(a.deleted, b.deleted);
   return {
     name: mergeRegister(a.name, b.name)!,
+    ...(parentId ? { parentId } : {}),
     ...(deleted ? { deleted } : {}),
   };
 }
@@ -175,7 +184,7 @@ function mergeMap<T>(
 /** 有效事件集合上满足交换律、结合律、幂等律；不改写任何输入。 */
 export function mergeOrganization(a: LibraryOrganization, b: LibraryOrganization): LibraryOrganization {
   return {
-    schemaVersion: 1,
+    schemaVersion: ORGANIZATION_SCHEMA_VERSION,
     folders: mergeMap(a.folders, b.folders, mergeFolder),
     books: mergeMap(a.books, b.books, mergeBook),
   };
@@ -188,6 +197,7 @@ export function maxObservedCounter(state: LibraryOrganization): number {
   };
   for (const folder of Object.values(state.folders)) {
     observe(folder.name.stamp);
+    observe(folder.parentId?.stamp);
     observe(folder.deleted);
   }
   for (const book of Object.values(state.books)) {
@@ -219,12 +229,238 @@ export function mergeIntoEnvelope(
   };
 }
 
-/** 仅视图投影！未知 / 已删文件夹显示在根目录（null），原始引用必须保留。 */
+/**
+ * Deterministic view projection shared with Rust.
+ *
+ * - Missing / deleted parents are skipped and a live node is lifted to the
+ *   nearest live ancestor.  Deleted folders themselves stay hidden.
+ * - Cycles in the live parent graph are broken at the lexicographically
+ *   smallest UUID in each cycle; that node becomes a root.  Raw references are
+ *   never rewritten.
+ * - Nodes deeper than five are re-parented to their fifth-level ancestor, so a
+ *   remotely merged invalid depth is still displayed as a bounded tree.  Local
+ *   create/move commands reject such a result instead of persisting it.
+ */
+export interface FolderTreeProjection {
+  /** Live folder -> effective parent (null is root). */
+  readonly parentById: ReadonlyMap<string, string | null>;
+  /** Live folder -> effective depth, root = 1. */
+  readonly depthById: ReadonlyMap<string, number>;
+  /** Live folder -> depth before the five-level display clamp; local writes use it. */
+  readonly unclampedDepthById: ReadonlyMap<string, number>;
+  /** Effective parent (null is root) -> direct child UUIDs, ASCII sorted. */
+  readonly childrenByParent: ReadonlyMap<string | null, readonly string[]>;
+}
+
+const projectionCache = new WeakMap<LibraryOrganization, FolderTreeProjection>();
+
+function parentValue(folder: FolderState | undefined): string | null {
+  return folder?.parentId?.value ?? null;
+}
+
+function liveAncestorOf(state: LibraryOrganization, start: string): string | null {
+  const seen = new Set<string>([start]);
+  let current = parentValue(state.folders[start]);
+  while (current !== null) {
+    if (seen.has(current)) return current === start ? start : null;
+    seen.add(current);
+    const folder = state.folders[current];
+    if (!folder) return null;
+    if (!folder.deleted) return current;
+    current = parentValue(folder);
+  }
+  return null;
+}
+
+/** Cached because ShelfView projects many books from one immutable snapshot. */
+export function projectFolderTree(state: LibraryOrganization): FolderTreeProjection {
+  const cached = projectionCache.get(state);
+  if (cached) return cached;
+
+  const liveIds = Object.keys(state.folders)
+    .filter((id) => !state.folders[id].deleted)
+    .sort();
+  const nextLive = new Map<string, string | null>();
+  for (const id of liveIds) nextLive.set(id, liveAncestorOf(state, id));
+
+  // Find every cycle in the functional graph id -> nextLive(id).  The UUID
+  // order, not iteration order, chooses the break root.
+  const cycleRoots = new Set<string>();
+  const visited = new Set<string>();
+  const inStack = new Set<string>();
+  const stack: string[] = [];
+  const visit = (id: string): void => {
+    if (visited.has(id)) return;
+    if (inStack.has(id)) {
+      const cycle = stack.slice(stack.indexOf(id));
+      cycle.sort();
+      cycleRoots.add(cycle[0]);
+      return;
+    }
+    inStack.add(id);
+    stack.push(id);
+    const parent = nextLive.get(id) ?? null;
+    if (parent !== null) visit(parent);
+    stack.pop();
+    inStack.delete(id);
+    visited.add(id);
+  };
+  for (const id of liveIds) visit(id);
+
+  const baseParent = new Map<string, string | null>();
+  for (const id of liveIds) {
+    baseParent.set(id, cycleRoots.has(id) ? null : nextLive.get(id) ?? null);
+  }
+
+  // Compute base depth without recursion over potentially long remote chains.
+  const baseDepth = new Map<string, number>();
+  for (const id of liveIds) {
+    if (baseDepth.has(id)) continue;
+    const path: string[] = [];
+    let cursor: string | null = id;
+    while (cursor !== null && !baseDepth.has(cursor)) {
+      path.push(cursor);
+      cursor = baseParent.get(cursor) ?? null;
+    }
+    let depth = cursor === null ? 0 : baseDepth.get(cursor)!;
+    for (let index = path.length - 1; index >= 0; index -= 1) {
+      depth += 1;
+      baseDepth.set(path[index], depth);
+    }
+  }
+
+  const parentById = new Map<string, string | null>();
+  const depthById = new Map<string, number>();
+  for (const id of liveIds) {
+    const depth = baseDepth.get(id)!;
+    if (depth <= MAX_FOLDER_DEPTH) {
+      parentById.set(id, baseParent.get(id) ?? null);
+      depthById.set(id, depth);
+      continue;
+    }
+    // Climb from this node to its depth-five ancestor.  That ancestor is a
+    // live node with base depth five, so no cycle can be introduced here.
+    let cursor = id;
+    while ((baseDepth.get(cursor) ?? 1) > MAX_FOLDER_DEPTH) {
+      cursor = baseParent.get(cursor)!;
+    }
+    parentById.set(id, cursor);
+    depthById.set(id, MAX_FOLDER_DEPTH);
+  }
+
+  const childrenByParent = new Map<string | null, string[]>();
+  for (const id of liveIds) {
+    const parent = parentById.get(id) ?? null;
+    const children = childrenByParent.get(parent);
+    if (children) children.push(id);
+    else childrenByParent.set(parent, [id]);
+  }
+  for (const children of childrenByParent.values()) children.sort();
+
+  const projection: FolderTreeProjection = {
+    parentById,
+    depthById,
+    unclampedDepthById: baseDepth,
+    childrenByParent,
+  };
+  projectionCache.set(state, projection);
+  return projection;
+}
+
+/**
+ * Stored lineage used by export/import selection.  It follows the raw parent
+ * register and includes deleted ancestors, because a selected book may need
+ * them to retain its projected placement.  Order is [folder, parent, ...].
+ */
+export function folderStoredLineage(state: LibraryOrganization, folderId: string): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  let current: string | null = folderId;
+  while (current !== null && !seen.has(current)) {
+    seen.add(current);
+    const folder = state.folders[current];
+    if (!folder) break;
+    result.push(current);
+    current = parentValue(folder);
+  }
+  return result;
+}
+
+/** Live folder ID(s) required to preserve a raw folder reference. */
+export function requiredFolderIds(state: LibraryOrganization, folderId: string | null | undefined): string[] {
+  if (!folderId) return [];
+  const folder = state.folders[folderId];
+  if (!folder) return [];
+  if (!folder.deleted) return [folderId];
+  const promoted = liveAncestorOf(state, folderId);
+  return promoted ? [folderId, promoted] : [folderId];
+}
+
+/** View projection only: hidden/unknown folders are lifted to their nearest live ancestor. */
 export function effectiveFolderId(state: LibraryOrganization, contentHash: string): string | null {
   const id = state.books[contentHash]?.folderId?.value ?? null;
   if (id === null) return null;
   const folder = state.folders[id];
-  return folder && !folder.deleted ? id : null;
+  if (!folder) return null;
+  if (!folder.deleted) return id;
+  const promoted = liveAncestorOf(state, id);
+  const target = promoted ? state.folders[promoted] : undefined;
+  return target && !target.deleted ? promoted : null;
+}
+
+/** Effective parent for a live folder; deleted/unknown folders have no visible parent. */
+export function effectiveFolderParent(state: LibraryOrganization, folderId: string): string | null {
+  const folder = state.folders[folderId];
+  if (!folder || folder.deleted) return null;
+  return projectFolderTree(state).parentById.get(folderId) ?? null;
+}
+
+/** 1-based effective depth; null for deleted/unknown folders. */
+export function effectiveFolderDepth(state: LibraryOrganization, folderId: string): number | null {
+  const folder = state.folders[folderId];
+  if (!folder || folder.deleted) return null;
+  return projectFolderTree(state).depthById.get(folderId) ?? null;
+}
+
+/** Root-first effective ancestors, excluding the folder itself. */
+export function effectiveFolderAncestors(state: LibraryOrganization, folderId: string): string[] {
+  const depth = effectiveFolderDepth(state, folderId);
+  if (depth === null) return [];
+  const projection = projectFolderTree(state);
+  const result: string[] = [];
+  let current = projection.parentById.get(folderId) ?? null;
+  while (current !== null) {
+    result.push(current);
+    current = projection.parentById.get(current) ?? null;
+  }
+  return result.reverse();
+}
+
+/** Effective direct children, ASCII sorted; deleted folders never appear. */
+export function effectiveFolderChildren(
+  state: LibraryOrganization,
+  parentId: string | null,
+): string[] {
+  const projection = projectFolderTree(state);
+  if (parentId !== null) {
+    const parent = state.folders[parentId];
+    if (!parent || parent.deleted) return [];
+  }
+  return [...(projection.childrenByParent.get(parentId) ?? [])];
+}
+
+/** All effective descendants (not including the folder), ASCII sorted. */
+export function effectiveFolderDescendants(state: LibraryOrganization, folderId: string): string[] {
+  if (effectiveFolderDepth(state, folderId) === null) return [];
+  const result = new Set<string>();
+  const pending = [...effectiveFolderChildren(state, folderId)];
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    if (result.has(current)) continue;
+    result.add(current);
+    pending.push(...effectiveFolderChildren(state, current));
+  }
+  return [...result].sort();
 }
 
 export function isFavorite(state: LibraryOrganization, contentHash: string): boolean {
@@ -237,9 +473,10 @@ export function validateOrganization(raw: unknown): LibraryOrganization {
     throw new Error("收藏与文件夹数据必须为对象");
   }
   const obj = raw as Record<string, unknown>;
-  if (obj.schemaVersion !== ORGANIZATION_SCHEMA_VERSION) {
+  if (obj.schemaVersion !== ORGANIZATION_LEGACY_SCHEMA_VERSION && obj.schemaVersion !== ORGANIZATION_SCHEMA_VERSION) {
     throw new Error(`收藏与文件夹数据版本不受支持：${String(obj.schemaVersion)}`);
   }
+  const legacy = obj.schemaVersion === ORGANIZATION_LEGACY_SCHEMA_VERSION;
   if (!obj.folders || typeof obj.folders !== "object" || Array.isArray(obj.folders)) {
     throw new Error("收藏与文件夹数据缺少有效的 folders 字典");
   }
@@ -263,12 +500,33 @@ export function validateOrganization(raw: unknown): LibraryOrganization {
     if (!f.name || typeof f.name !== "object" || Array.isArray(f.name)) {
       throw new Error(`文件夹 ${folderId} 缺少有效的 name 寄存器`);
     }
+    if (legacy && Object.prototype.hasOwnProperty.call(f, "parentId")) {
+      throw new Error(`版本 1 的文件夹 ${folderId} 不能包含 parentId`);
+    }
+    if (Object.prototype.hasOwnProperty.call(f, "parentId") && f.parentId === null) {
+      throw new Error(`文件夹 ${folderId} 的 parentId 字段不能为 null`);
+    }
     const nameReg = f.name as Record<string, unknown>;
     if (typeof nameReg.value !== "string" || !validFolderName(nameReg.value)) {
       throw new Error(`文件夹 ${folderId} 含有无效的名称`);
     }
     if (!validStamp(nameReg.stamp)) {
       throw new Error(`文件夹 ${folderId} 含有无效的逻辑时钟`);
+    }
+
+    let parentReg: Register<string | null> | undefined = undefined;
+    if (f.parentId !== undefined) {
+      const parent = f.parentId as Record<string, unknown>;
+      if (parent.value !== null && !validCanonicalUuid(parent.value)) {
+        throw new Error(`文件夹 ${folderId} 的 parentId.value 必须为有效 UUID 或 null`);
+      }
+      if (!validStamp(parent.stamp)) {
+        throw new Error(`文件夹 ${folderId} 的 parentId 含有无效的逻辑时钟`);
+      }
+      parentReg = {
+        value: parent.value as string | null,
+        stamp: { counter: (parent.stamp as Stamp).counter, deviceId: (parent.stamp as Stamp).deviceId },
+      };
     }
 
     let deletedStamp: Stamp | undefined = undefined;
@@ -284,6 +542,7 @@ export function validateOrganization(raw: unknown): LibraryOrganization {
         value: nameReg.value,
         stamp: { counter: (nameReg.stamp as Stamp).counter, deviceId: (nameReg.stamp as Stamp).deviceId },
       },
+      ...(parentReg ? { parentId: parentReg } : {}),
       ...(deletedStamp ? { deleted: deletedStamp } : {}),
     };
   }
@@ -341,7 +600,7 @@ export function validateOrganization(raw: unknown): LibraryOrganization {
   }
 
   return {
-    schemaVersion: 1,
+    schemaVersion: ORGANIZATION_SCHEMA_VERSION,
     folders: cleanFolders,
     books: cleanBooks,
   };
@@ -366,6 +625,93 @@ export function validateEnvelope(raw: unknown): OrganizationEnvelope {
   };
 }
 
+function requireLiveFolder(state: LibraryOrganization, folderId: string, missing: string, deleted: string): FolderState {
+  if (!validCanonicalUuid(folderId)) throw new Error("无效的文件夹 ID");
+  const folder = state.folders[folderId];
+  if (!folder) throw new Error(missing);
+  if (folder.deleted) throw new Error(deleted);
+  return folder;
+}
+
+/** All folders whose stored parent chain reaches `folderId`, including itself. */
+function storedSubtreeIds(state: LibraryOrganization, folderId: string): string[] {
+  const children = new Map<string, string[]>();
+  for (const [id, folder] of Object.entries(state.folders)) {
+    const parent = parentValue(folder);
+    if (parent === null) continue;
+    const list = children.get(parent);
+    if (list) list.push(id);
+    else children.set(parent, [id]);
+  }
+  const result: string[] = [];
+  const seen = new Set<string>();
+  const pending = [folderId];
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    if (seen.has(current)) continue;
+    seen.add(current);
+    result.push(current);
+    pending.push(...(children.get(current) ?? []));
+  }
+  return result;
+}
+
+function assertNoStoredCycle(state: LibraryOrganization, folderId: string, parentId: string): void {
+  const seen = new Set<string>();
+  let current: string | null = parentId;
+  while (current !== null) {
+    if (current === folderId) throw new Error("文件夹层级不能形成环");
+    if (seen.has(current)) throw new Error("文件夹层级存在循环");
+    seen.add(current);
+    const folder = state.folders[current];
+    if (!folder) return;
+    current = parentValue(folder);
+  }
+}
+
+/**
+ * Validate a local create/move target.  The caller writes a parent register;
+ * this checks both the raw graph (no cycle) and the unclamped effective depth
+ * of every folder moved with the subtree (maximum five levels).
+ */
+function assertFolderPlacement(
+  state: LibraryOrganization,
+  folderId: string,
+  parentId: string | null,
+  creating: boolean,
+): void {
+  const candidate: LibraryOrganization = {
+    ...state,
+    folders: {
+      ...state.folders,
+      ...(creating
+        ? {
+            [folderId]: {
+              name: { value: "待校验", stamp: { counter: 1, deviceId: "00000000-0000-4000-8000-000000000000" } },
+              parentId: { value: parentId, stamp: { counter: 1, deviceId: "00000000-0000-4000-8000-000000000000" } },
+            },
+          }
+        : {
+            [folderId]: {
+              ...state.folders[folderId],
+              parentId: { value: parentId, stamp: { counter: 1, deviceId: "00000000-0000-4000-8000-000000000000" } },
+            },
+          }),
+    },
+  };
+  if (parentId !== null) assertNoStoredCycle(state, folderId, parentId);
+  const projection = projectFolderTree(candidate);
+  const affected = creating ? [folderId] : storedSubtreeIds(state, folderId);
+  for (const id of affected) {
+    const folder = candidate.folders[id];
+    if (!folder || folder.deleted) continue;
+    const depth = projection.unclampedDepthById.get(id);
+    if (depth === undefined || depth > MAX_FOLDER_DEPTH) {
+      throw new Error(`文件夹层级不能超过 ${MAX_FOLDER_DEPTH} 层`);
+    }
+  }
+}
+
 /** 本地命令 Reducer：与 Rust `apply_command` 逻辑完全对齐 */
 export function applyCommand(
   envelope: OrganizationEnvelope,
@@ -381,17 +727,53 @@ export function applyCommand(
         throw new Error("该文件夹 ID 已被使用");
       }
       const name = normalizeFolderName(command.name);
+      const parentId = command.parentId ?? null;
+      if (parentId !== null) {
+        requireLiveFolder(envelope.state, parentId, "父文件夹不存在", "父文件夹已解散");
+      }
+      assertFolderPlacement(envelope.state, command.folderId, parentId, true);
       const stamp = nextStamp(envelope);
       const nextFolders = {
         ...envelope.state.folders,
         [command.folderId]: {
           name: { value: name, stamp },
+          parentId: { value: parentId, stamp },
         },
       };
       return {
         deviceId: envelope.deviceId,
         counter: stamp.counter,
-        state: { ...envelope.state, folders: nextFolders },
+        state: { ...envelope.state, schemaVersion: ORGANIZATION_SCHEMA_VERSION, folders: nextFolders },
+      };
+    }
+
+    case "moveFolder": {
+      if (!validCanonicalUuid(command.folderId)) {
+        throw new Error("无效的文件夹 ID");
+      }
+      if (command.parentId !== null && !validCanonicalUuid(command.parentId)) {
+        throw new Error("无效的文件夹 ID");
+      }
+      const existing = requireLiveFolder(envelope.state, command.folderId, "文件夹不存在", "文件夹已解散");
+      if (command.parentId === command.folderId) {
+        throw new Error("文件夹不能移动到自身");
+      }
+      if (command.parentId !== null) {
+        requireLiveFolder(envelope.state, command.parentId, "目标文件夹不存在", "目标文件夹已解散");
+      }
+      assertFolderPlacement(envelope.state, command.folderId, command.parentId, false);
+      const stamp = nextStamp(envelope);
+      const nextFolders = {
+        ...envelope.state.folders,
+        [command.folderId]: {
+          ...existing,
+          parentId: { value: command.parentId, stamp },
+        },
+      };
+      return {
+        deviceId: envelope.deviceId,
+        counter: stamp.counter,
+        state: { ...envelope.state, schemaVersion: ORGANIZATION_SCHEMA_VERSION, folders: nextFolders },
       };
     }
 
@@ -418,7 +800,7 @@ export function applyCommand(
       return {
         deviceId: envelope.deviceId,
         counter: stamp.counter,
-        state: { ...envelope.state, folders: nextFolders },
+        state: { ...envelope.state, schemaVersion: ORGANIZATION_SCHEMA_VERSION, folders: nextFolders },
       };
     }
 
@@ -445,7 +827,7 @@ export function applyCommand(
       return {
         deviceId: envelope.deviceId,
         counter: stamp.counter,
-        state: { ...envelope.state, folders: nextFolders },
+        state: { ...envelope.state, schemaVersion: ORGANIZATION_SCHEMA_VERSION, folders: nextFolders },
       };
     }
 
@@ -469,7 +851,7 @@ export function applyCommand(
       return {
         deviceId: envelope.deviceId,
         counter: stamp.counter,
-        state: { ...envelope.state, books: nextBooks },
+        state: { ...envelope.state, schemaVersion: ORGANIZATION_SCHEMA_VERSION, books: nextBooks },
       };
     }
 
@@ -500,7 +882,7 @@ export function applyCommand(
       return {
         deviceId: envelope.deviceId,
         counter: stamp.counter,
-        state: { ...envelope.state, books: nextBooks },
+        state: { ...envelope.state, schemaVersion: ORGANIZATION_SCHEMA_VERSION, books: nextBooks },
       };
     }
   }

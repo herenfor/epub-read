@@ -48,11 +48,11 @@ pub async fn idle(activity: &mut watch::Receiver<Activity>, cancel: &Cancel) -> 
 
 pub fn empty() -> PortableStateV3 {
     PortableStateV3 {
-        schema_version: 3,
+        schema_version: 8,
         books: BTreeMap::new(),
         preferences: None,
         organization: crate::library_organization::LibraryOrganization {
-            schema_version: 1,
+            schema_version: 2,
             books: BTreeMap::new(),
             folders: BTreeMap::new(),
         },

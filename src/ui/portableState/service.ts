@@ -356,7 +356,7 @@ function buildLegacyImportState(
     };
   }
   return {
-    state: { schemaVersion: portableSchemaVersion(books), books, organization },
+    state: { schemaVersion: portableSchemaVersion(books, organization), books, organization },
     nextCounter: counter,
     importedHashes,
   };
@@ -451,10 +451,11 @@ export class PortableStateService implements PortableStateCommandService {
 
     const rawPreferences = await tx.getMeta(META_PREFERENCES);
     const preferences = rawPreferences === undefined ? undefined : parsePortablePreferences(rawPreferences);
+    const organization = envelope?.state ?? emptyOrganization();
     const state: PortableStateV3 = {
-      schemaVersion: portableSchemaVersion(books),
+      schemaVersion: portableSchemaVersion(books, organization),
       books,
-      organization: envelope?.state ?? emptyOrganization(),
+      organization,
       ...(preferences === undefined ? {} : { preferences }),
     };
     return { state, revisions };

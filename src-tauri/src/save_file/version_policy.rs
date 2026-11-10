@@ -22,15 +22,16 @@ pub(crate) enum VersionError {
 /// Select a ZIP archive reader by the exact container/state pair.
 ///
 /// Schema 4 permits TXT/comics, 5 adds FB2 identities, 6 adds highlight data,
-/// 7 adds MOBI/AZW3 identities. Do not turn this into a range check: old values
-/// can be invalid and must not be silently decoded by the current v3 reader.
+/// 7 adds MOBI/AZW3 identities, 8 adds nested folder parent relations. Do not
+/// turn this into a range check: old values can be invalid and must not be
+/// silently decoded by the current v3 reader.
 pub(crate) fn select_archive_reader(
     container: u32,
     schema: u64,
 ) -> Result<ArchiveReader, VersionError> {
     match (container, schema) {
-        (1, 3 | 4 | 5 | 6 | 7) => Ok(ArchiveReader::Container1State3),
-        (container, schema) if container > 1 || schema > 7 => Err(VersionError::NeedsNewerApp),
+        (1, 3 | 4 | 5 | 6 | 7 | 8) => Ok(ArchiveReader::Container1State3),
+        (container, schema) if container > 1 || schema > 8 => Err(VersionError::NeedsNewerApp),
         _ => Err(VersionError::UnsupportedFormat),
     }
 }
@@ -71,6 +72,10 @@ mod tests {
         );
         assert_eq!(
             select_archive_reader(1, 8),
+            Ok(ArchiveReader::Container1State3)
+        );
+        assert_eq!(
+            select_archive_reader(1, 9),
             Err(VersionError::NeedsNewerApp)
         );
         assert_eq!(
