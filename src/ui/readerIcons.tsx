@@ -440,3 +440,90 @@ export function TrashIcon({ size = 14, className = "", ...props }: IconProps) {
     </svg>
   );
 }
+
+/** Selection menu: a marker pen over a stroke of ink; the ink takes --hl-line when a color class is set. */
+export function HighlighterIcon({ size = 20, className = "", ...props }: IconProps) {
+  return (
+    <svg
+      className={`reader-svg-icon icon-highlighter ${className}`.trim()}
+      viewBox="0 0 20 20"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      {...props}
+    >
+      <path d="M11.5 2.8l4.2 4.2-6.2 6.2H6.3v-3.2zM9.9 4.4l4.2 4.2" />
+      <path d="M4.5 17.2h11" strokeWidth={2.4} style={{ stroke: "var(--hl-line, currentColor)" }} />
+    </svg>
+  );
+}
+
+/** Selection menu: a sheet with a folded corner and two lines of writing. */
+export function NoteIcon({ size = 20, className = "", ...props }: IconProps) {
+  return (
+    <svg
+      className={`reader-svg-icon icon-note ${className}`.trim()}
+      viewBox="0 0 20 20"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      {...props}
+    >
+      <path d="M4.5 4.5h11V12L12 15.5H4.5zM15.5 12H12v3.5M7.5 8h5M7.5 11H10" />
+    </svg>
+  );
+}
+
+/** Selection menu: two stacked sheets. */
+export function CopyIcon({ size = 20, className = "", ...props }: IconProps) {
+  return (
+    <svg
+      className={`reader-svg-icon icon-copy ${className}`.trim()}
+      viewBox="0 0 20 20"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      {...props}
+    >
+      <path d="M8.5 7.5h6A1.5 1.5 0 0 1 16 9v6a1.5 1.5 0 0 1-1.5 1.5h-6A1.5 1.5 0 0 1 7 15V9a1.5 1.5 0 0 1 1.5-1.5z" />
+      <path d="M13 7.5v-2A1.5 1.5 0 0 0 11.5 4h-6A1.5 1.5 0 0 0 4 5.5v6A1.5 1.5 0 0 0 5.5 13H7" />
+    </svg>
+  );
+}
+
+/** Selection menu: a sheet behind a small open book, i.e. copy the book's own text. */
+export function CopyOriginalIcon({ size = 20, className = "", ...props }: IconProps) {
+  return (
+    <svg
+      className={`reader-svg-icon icon-copy-original ${className}`.trim()}
+      viewBox="0 0 20 20"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      {...props}
+    >
+      <path d="M12.5 6.6V5.5A1.5 1.5 0 0 0 11 4H5.5A1.5 1.5 0 0 0 4 5.5V11a1.5 1.5 0 0 0 1.5 1.5h.6" />
+      <path d="M7.5 9.2c1.4-.7 2.9-.7 4.3 0 1.4-.7 2.9-.7 4.3 0v6.6c-1.4-.7-2.9-.7-4.3 0-1.4-.7-2.9-.7-4.3 0zM11.8 9.2v6.6" />
+    </svg>
+  );
+}
