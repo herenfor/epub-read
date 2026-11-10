@@ -101,7 +101,7 @@ export const folderImport = defineMessages("folderImport", {
   "folderImport.newFolders.other": { zh: "{count} 个", note: "Number of new shelf folders in the preview." },
   "folderImport.newFolders.one": { zh: "{count} 个", note: "Singular form." },
   "folderImport.into": "导入到：",
-  "folderImport.into.root": "当前在书架根目录，「{remaining}」层可用。",
+  "folderImport.into.root": "选中的文件夹算第 1 层，往下最多建到第 {remaining} 层。",
   "folderImport.into.deep": "当前文件夹在第 {depth} 层，下面最多还能再建 {remaining} 层。",
   "folderImport.merged": "有 {directories} 个目录超过了第五层：里面的 {books} 本书会放进「{name}」，一本不漏。",
   "folderImport.treeHead": "书会这样放",

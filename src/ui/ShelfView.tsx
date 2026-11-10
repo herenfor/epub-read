@@ -1,6 +1,6 @@
 import { Segmented } from "./controls/Segmented";
 import type { ShelfLibraryView } from "./libraryLoad";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { MENU_CLOSE_MS, menuCloseMs } from "./menuMotion";
 import { createPortal } from "react-dom";
 import { getShelfMenuPortalHost } from "./shelfMenuPlacement";
@@ -1308,6 +1308,21 @@ export function ShelfView(props: ShelfViewProps) {
 
   const scopeRef = useRef(scope);
   scopeRef.current = scope;
+
+  // 逐级进出文件夹：进入更深一层时新内容浮入，返回时从下方回到原位（page 动效，见 motionKinds.css）。
+  const levelPageRef = useRef<HTMLDivElement>(null);
+  const levelDepth = scope.type === "folder" ? currentFolderPath.length : scope.type === "root" ? 0 : -1;
+  const levelKey = scope.type === "folder" ? scope.folderId : scope.type;
+  const lastLevelRef = useRef({ key: levelKey, depth: levelDepth });
+  useLayoutEffect(() => {
+    const last = lastLevelRef.current;
+    lastLevelRef.current = { key: levelKey, depth: levelDepth };
+    const el = levelPageRef.current;
+    if (!el || last.key === levelKey || last.depth < 0 || levelDepth < 0) return;
+    el.removeAttribute("data-level-nav");
+    void el.offsetWidth;
+    el.setAttribute("data-level-nav", levelDepth < last.depth ? "back" : "forward");
+  }, [levelKey, levelDepth]);
 
   // 点文件夹卡片在原地进入该文件夹页面，不再先开居中弹窗。
   const handleOpenFolderModal = useCallback((folderId: string) => {
@@ -2674,196 +2689,6 @@ export function ShelfView(props: ShelfViewProps) {
             </button>
           )}
 
-          {/* 当前文件夹路径栏：返回上一级、可点的各级路径、直属/合计和文件夹操作 */}
-          {scope.type === "folder" && currentFolder && (
-            <>
-              <div className={`shelf-folder-path-bar${isCompactMobile ? " is-compact" : ""}`}>
-                <button
-                  className="shelf-folder-path-back"
-                  type="button"
-                  onClick={() => setScope(currentFolderParentId === null
-                    ? { type: "root" }
-                    : { type: "folder", folderId: currentFolderParentId })}
-                  title={t("shelfMain.folder.up")}
-                  aria-label={t("shelfMain.folder.up")}
-                >
-                  <ArrowLeftIcon />
-                </button>
-                <nav ref={folderCrumbsRef} className="shelf-folder-path-crumbs" aria-label={t("shelfMain.folder.path")}>
-                  <button
-                    className="shelf-folder-path-crumb"
-                    type="button"
-                    onClick={() => setScope({ type: "root" })}
-                  >
-                    {t("shelfMain.folder.root")}
-                  </button>
-                  {currentFolderPath.map((node) => {
-                    const here = node.id === currentFolder.id;
-                    return (
-                      <span key={node.id} className="shelf-folder-path-segment">
-                        <span className="shelf-folder-path-sep" aria-hidden="true">›</span>
-                        {here ? (
-                          <span className="shelf-folder-path-here" aria-current="page" title={node.name}>{node.name}</span>
-                        ) : (
-                          <button
-                            className="shelf-folder-path-crumb"
-                            type="button"
-                            onClick={() => setScope({ type: "folder", folderId: node.id })}
-                          >
-                            {node.name}
-                          </button>
-                        )}
-                      </span>
-                    );
-                  })}
-                </nav>
-                {!isCompactMobile && (
-                  <span className="shelf-folder-path-count">
-                    {currentFolderHasChildren
-                      ? t("shelfMain.folder.directTotal", { direct: currentFolderDirectCount, total: currentFolderTotalCount })
-                      : tn("shelfMain.folder.bookCount", currentFolderTotalCount, { count: currentFolderTotalCount })}
-                  </span>
-                )}
-                <span className="shelf-folder-path-spacer" />
-                {!isCompactMobile && (
-                  <>
-                    <button
-                      className="shelf-folder-path-action"
-                      type="button"
-                      onClick={importHere}
-                      disabled={props.busy || props.importActive}
-                    >
-                      <PlusIcon />
-                      <span>{t("shelfFolder.importHere")}</span>
-                    </button>
-                    <button
-                      className="shelf-folder-path-action"
-                      type="button"
-                      disabled={props.busy || currentFolderLevelFive}
-                      title={currentFolderLevelFive ? t("shelfMain.folder.levelFive.short") : t("shelfMain.folder.newChild")}
-                      onClick={() => setCreateFolderOpen({ parentId: currentFolder.id })}
-                    >
-                      <PlusIcon />
-                      <span>{t("shelfMain.folder.newChild")}</span>
-                    </button>
-                  </>
-                )}
-                <div className="shelf-folder-active-more-wrap" ref={folderActiveMoreRef}>
-                  <button
-                    className="shelf-folder-path-more"
-                    type="button"
-                    onClick={() => setFolderActiveMoreOpen(!folderActiveMoreOpen)}
-                    aria-expanded={folderActiveMoreOpen}
-                    aria-haspopup="menu"
-                    title={t("shelfMain.folder.actions")}
-                    aria-label={t("shelfMain.folder.actions")}
-                  >
-                    <DotsVerticalIcon />
-                  </button>
-                  {folderActiveMoreOpen && (
-                    <div className="shelf-folder-active-menu" role="menu">
-                      <button
-                        className="shelf-folder-menu-item shelf-folder-menu-compact-only"
-                        type="button"
-                        disabled={props.busy || props.importActive}
-                        onClick={() => {
-                          setFolderActiveMoreOpen(false);
-                          importHere();
-                        }}
-                      >
-                        <PlusIcon />
-                        <span>{t("shelfFolder.importHere")}</span>
-                      </button>
-                      <button
-                        className="shelf-folder-menu-item shelf-folder-menu-compact-only"
-                        type="button"
-                        disabled={props.busy || currentFolderLevelFive}
-                        onClick={() => {
-                          setFolderActiveMoreOpen(false);
-                          setCreateFolderOpen({ parentId: currentFolder.id });
-                        }}
-                      >
-                        <PlusIcon />
-                        <span>{currentFolderLevelFive ? t("shelfMain.folder.levelFive.short") : t("shelfMain.folder.newChild")}</span>
-                      </button>
-                      {canOrganize && (
-                        <button
-                          className="shelf-folder-menu-item"
-                          type="button"
-                          disabled={props.busy}
-                          onClick={() => {
-                            setFolderActiveMoreOpen(false);
-                            setAddBooksFolder(currentFolder);
-                          }}
-                        >
-                          <CheckListIcon />
-                          <span>{t("shelfFolder.addBooks.open")}</span>
-                        </button>
-                      )}
-                      {props.onExportBooks && (
-                        <button
-                          className="shelf-folder-menu-item"
-                          type="button"
-                          disabled={bookExportDisabled || currentFolderTotalCount === 0}
-                          onClick={() => {
-                            setFolderActiveMoreOpen(false);
-                            handleExportFolderBooks(currentFolder.id);
-                          }}
-                        >
-                          <ExportIcon />
-                          <span>{t("bookExport.action")}</span>
-                        </button>
-                      )}
-                      <button
-                        className="shelf-folder-menu-item"
-                        type="button"
-                        onClick={() => {
-                          setFolderActiveMoreOpen(false);
-                          setRenameFolderTarget(currentFolder);
-                        }}
-                      >
-                        <EditIcon />
-                        <span>{t("shelfMain.folder.rename")}</span>
-                      </button>
-                      {canOrganize && (
-                        <button
-                          className="shelf-folder-menu-item"
-                          type="button"
-                          disabled={props.busy}
-                          onClick={() => {
-                            setFolderActiveMoreOpen(false);
-                            setMoveFolderTarget(currentFolder);
-                          }}
-                        >
-                          <FolderIcon />
-                          <span>{t("shelfMain.folder.move")}</span>
-                        </button>
-                      )}
-                      <button
-                        className="shelf-folder-menu-item danger"
-                        type="button"
-                        onClick={() => {
-                          setFolderActiveMoreOpen(false);
-                          setDissolveFolderTarget(currentFolder);
-                        }}
-                      >
-                        <TrashIcon />
-                        <span>{t("shelfMain.folder.dissolve")}</span>
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="shelf-folder-path-meta">
-                {currentFolderHasChildren
-                  ? t("shelfMain.folder.directTotal", { direct: currentFolderDirectCount, total: currentFolderTotalCount })
-                  : tn("shelfMain.folder.bookCount", currentFolderTotalCount, { count: currentFolderTotalCount })}
-              </div>
-              {currentFolderLevelFive && (
-                <div className="shelf-folder-level-hint" role="note">{folderLevelLimit}</div>
-              )}
-            </>
-          )}
         </div>
 
         {/* 右侧排序与密度轨（移动端紧凑模式由设置抽屉统一承接，外部不重复显示） */}
@@ -2912,6 +2737,197 @@ export function ShelfView(props: ShelfViewProps) {
           </div>
         )}
       </nav>
+
+      {/* 当前文件夹路径栏：返回上一级、可点的各级路径、直属/合计和文件夹操作 */}
+      {scope.type === "folder" && currentFolder && (
+        <>
+          <div className={`shelf-folder-path-bar${isCompactMobile ? " is-compact" : ""}`}>
+            <button
+              className="shelf-folder-path-back"
+              type="button"
+              onClick={() => setScope(currentFolderParentId === null
+                ? { type: "root" }
+                : { type: "folder", folderId: currentFolderParentId })}
+              title={t("shelfMain.folder.up")}
+              aria-label={t("shelfMain.folder.up")}
+            >
+              <ArrowLeftIcon />
+            </button>
+            <nav ref={folderCrumbsRef} className="shelf-folder-path-crumbs" aria-label={t("shelfMain.folder.path")}>
+              <button
+                className="shelf-folder-path-crumb"
+                type="button"
+                onClick={() => setScope({ type: "root" })}
+              >
+                {t("shelfMain.folder.root")}
+              </button>
+              {currentFolderPath.map((node) => {
+                const here = node.id === currentFolder.id;
+                return (
+                  <span key={node.id} className="shelf-folder-path-segment">
+                    <span className="shelf-folder-path-sep" aria-hidden="true">›</span>
+                    {here ? (
+                      <span className="shelf-folder-path-here" aria-current="page" title={node.name}>{node.name}</span>
+                    ) : (
+                      <button
+                        className="shelf-folder-path-crumb"
+                        type="button"
+                        onClick={() => setScope({ type: "folder", folderId: node.id })}
+                      >
+                        {node.name}
+                      </button>
+                    )}
+                  </span>
+                );
+              })}
+            </nav>
+            {!isCompactMobile && (
+              <span className="shelf-folder-path-count">
+                {currentFolderHasChildren
+                  ? t("shelfMain.folder.directTotal", { direct: currentFolderDirectCount, total: currentFolderTotalCount })
+                  : tn("shelfMain.folder.bookCount", currentFolderTotalCount, { count: currentFolderTotalCount })}
+              </span>
+            )}
+            <span className="shelf-folder-path-spacer" />
+            {!isCompactMobile && (
+              <>
+                <button
+                  className="shelf-folder-path-action"
+                  type="button"
+                  onClick={importHere}
+                  disabled={props.busy || props.importActive}
+                >
+                  <PlusIcon />
+                  <span>{t("shelfFolder.importHere")}</span>
+                </button>
+                <button
+                  className="shelf-folder-path-action"
+                  type="button"
+                  disabled={props.busy || currentFolderLevelFive}
+                  title={currentFolderLevelFive ? t("shelfMain.folder.levelFive.short") : t("shelfMain.folder.newChild")}
+                  onClick={() => setCreateFolderOpen({ parentId: currentFolder.id })}
+                >
+                  <PlusIcon />
+                  <span>{t("shelfMain.folder.newChild")}</span>
+                </button>
+              </>
+            )}
+            <div className="shelf-folder-active-more-wrap" ref={folderActiveMoreRef}>
+              <button
+                className="shelf-folder-path-more"
+                type="button"
+                onClick={() => setFolderActiveMoreOpen(!folderActiveMoreOpen)}
+                aria-expanded={folderActiveMoreOpen}
+                aria-haspopup="menu"
+                title={t("shelfMain.folder.actions")}
+                aria-label={t("shelfMain.folder.actions")}
+              >
+                <DotsVerticalIcon />
+              </button>
+              {folderActiveMoreOpen && (
+                <div className="shelf-folder-active-menu" role="menu">
+                  <button
+                    className="shelf-folder-menu-item shelf-folder-menu-compact-only"
+                    type="button"
+                    disabled={props.busy || props.importActive}
+                    onClick={() => {
+                      setFolderActiveMoreOpen(false);
+                      importHere();
+                    }}
+                  >
+                    <PlusIcon />
+                    <span>{t("shelfFolder.importHere")}</span>
+                  </button>
+                  <button
+                    className="shelf-folder-menu-item shelf-folder-menu-compact-only"
+                    type="button"
+                    disabled={props.busy || currentFolderLevelFive}
+                    onClick={() => {
+                      setFolderActiveMoreOpen(false);
+                      setCreateFolderOpen({ parentId: currentFolder.id });
+                    }}
+                  >
+                    <PlusIcon />
+                    <span>{currentFolderLevelFive ? t("shelfMain.folder.levelFive.short") : t("shelfMain.folder.newChild")}</span>
+                  </button>
+                  {canOrganize && (
+                    <button
+                      className="shelf-folder-menu-item"
+                      type="button"
+                      disabled={props.busy}
+                      onClick={() => {
+                        setFolderActiveMoreOpen(false);
+                        setAddBooksFolder(currentFolder);
+                      }}
+                    >
+                      <CheckListIcon />
+                      <span>{t("shelfFolder.addBooks.open")}</span>
+                    </button>
+                  )}
+                  {props.onExportBooks && (
+                    <button
+                      className="shelf-folder-menu-item"
+                      type="button"
+                      disabled={bookExportDisabled || currentFolderTotalCount === 0}
+                      onClick={() => {
+                        setFolderActiveMoreOpen(false);
+                        handleExportFolderBooks(currentFolder.id);
+                      }}
+                    >
+                      <ExportIcon />
+                      <span>{t("bookExport.action")}</span>
+                    </button>
+                  )}
+                  <button
+                    className="shelf-folder-menu-item"
+                    type="button"
+                    onClick={() => {
+                      setFolderActiveMoreOpen(false);
+                      setRenameFolderTarget(currentFolder);
+                    }}
+                  >
+                    <EditIcon />
+                    <span>{t("shelfMain.folder.rename")}</span>
+                  </button>
+                  {canOrganize && (
+                    <button
+                      className="shelf-folder-menu-item"
+                      type="button"
+                      disabled={props.busy}
+                      onClick={() => {
+                        setFolderActiveMoreOpen(false);
+                        setMoveFolderTarget(currentFolder);
+                      }}
+                    >
+                      <FolderIcon />
+                      <span>{t("shelfMain.folder.move")}</span>
+                    </button>
+                  )}
+                  <button
+                    className="shelf-folder-menu-item danger"
+                    type="button"
+                    onClick={() => {
+                      setFolderActiveMoreOpen(false);
+                      setDissolveFolderTarget(currentFolder);
+                    }}
+                  >
+                    <TrashIcon />
+                    <span>{t("shelfMain.folder.dissolve")}</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="shelf-folder-path-meta">
+            {currentFolderHasChildren
+              ? t("shelfMain.folder.directTotal", { direct: currentFolderDirectCount, total: currentFolderTotalCount })
+              : tn("shelfMain.folder.bookCount", currentFolderTotalCount, { count: currentFolderTotalCount })}
+          </div>
+          {currentFolderLevelFive && (
+            <div className="shelf-folder-level-hint" role="note">{folderLevelLimit}</div>
+          )}
+        </>
+      )}
 
       {/* 生效的筛选：每个维度一个可删除的摘要标签，不逐个列出选中的值 */}
       <ShelfFilterSummary filters={filters} facets={filterModel.facets} compact={isCompactMobile} onFiltersChange={setFilters} />
@@ -3089,7 +3105,7 @@ export function ShelfView(props: ShelfViewProps) {
           </table>
         </ShelfTableScroller>
       ) : (
-        <>
+        <div className="shelf-level-page" ref={levelPageRef}>
           {(scope.type === "root" || scope.type === "folder") && visibleFolders.length > 0 && folderCardsVisible && (
             <div className="shelf-folder-prefix">
               <div className="shelf-grid shelf-folder-grid">
@@ -3145,7 +3161,7 @@ export function ShelfView(props: ShelfViewProps) {
               ))}
             </div>
           </div>
-        </>
+        </div>
       )}
 
       {/* 新建文件夹弹层 */}

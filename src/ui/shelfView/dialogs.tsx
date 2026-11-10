@@ -5,7 +5,8 @@ import { MENU_CLOSE_MS } from "../menuMotion";
 import { useUiText } from "../localization/UiLanguageProvider";
 import type { ShelfEntry, ShelfSort } from "../shelf";
 import { isFavorite, type LibraryOrganization } from "../libraryOrganization";
-import { folderMoveBlockReason, shelfFolderPathLabel, shelfFolderSubtreeHeight } from "../shelfFolderTree";
+import { folderAlreadyAt,
+  folderMoveBlockReason, shelfFolderPathLabel, shelfFolderSubtreeHeight } from "../shelfFolderTree";
 import type { ThumbnailProvider } from "../thumbnail";
 import type { ShelfLongPress } from "../shelfPress";
 import {
@@ -283,12 +284,9 @@ export function ShelfMoveDialog(props: ShelfMoveDialogProps) {
 
   const blockFor = (targetFolderId: string | null): MoveBlock | null => {
     if (folderKind && movingFolder) {
-      if (props.currentFolderId === targetFolderId) return "already";
+      // 以被移动的文件夹自己的上级为准：它不一定是当前打开的那一层。
       if (targetFolderId === movingFolder.id) return "self";
-      if (targetFolderId === null) {
-        const block = folderMoveBlockReason(props.organization, movingFolder.id, null);
-        return block;
-      }
+      if (folderAlreadyAt(props.organization, movingFolder.id, targetFolderId)) return "already";
       return folderMoveBlockReason(props.organization, movingFolder.id, targetFolderId);
     }
     if (props.currentFolderId === targetFolderId) return "already";

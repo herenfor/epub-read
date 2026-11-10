@@ -95,7 +95,7 @@
   "folderImport.newFolders.other": "{count}",
   "folderImport.newFolders.one": "{count}",
   "folderImport.into": "Import into: ",
-  "folderImport.into.root": "At the library root; {remaining} levels available.",
+  "folderImport.into.root": "The chosen folder is level 1; folders go down to level {remaining} at most.",
   "folderImport.into.deep": "This folder is at level {depth}; {remaining} more levels can be created below.",
   "folderImport.merged": "{directories} directories exceed level five: their {books} books go into \"{name}\" — none are dropped.",
   "folderImport.treeHead": "Where books will go",

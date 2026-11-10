@@ -3730,3 +3730,76 @@
     display: flex;
   }
 }
+
+/* ER-0170 整改：路径栏独占一行（在分类轨下面、内容上面），不再挤在胶囊旁边。 */
+.shelf-folder-path-bar,
+.shelf-folder-path-bar.is-compact {
+  margin: -8px 0 16px;
+  padding: 5px 8px 5px 5px;
+  gap: 8px;
+}
+
+.shelf-folder-path-crumbs {
+  flex: 0 1 auto;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.shelf-folder-path-crumbs::-webkit-scrollbar {
+  display: none;
+}
+
+.shelf-folder-path-segment,
+.shelf-folder-path-sep {
+  flex: none;
+}
+
+.shelf-folder-path-sep {
+  padding: 0 1px;
+}
+
+.shelf-folder-path-meta {
+  margin: -10px 0 12px;
+  padding: 0 4px;
+}
+
+.shelf-folder-level-hint {
+  margin: -6px 0 16px;
+  background: color-mix(in srgb, #d18a12 10%, var(--shelf-card-bg, #fff));
+  border-color: color-mix(in srgb, #d18a12 38%, var(--shelf-card-border));
+  color: color-mix(in srgb, #7a5600 70%, var(--fg));
+}
+
+@media (max-width: 720px) {
+  .shelf-folder-path-bar,
+  .shelf-folder-path-bar.is-compact {
+    margin: -8px 0 12px;
+    padding: 2px;
+    gap: 2px;
+  }
+
+  .shelf-folder-path-crumbs {
+    flex: 1;
+  }
+
+  .shelf-folder-path-meta {
+    padding: 0 4px;
+  }
+}
+
+/* 逐级进出文件夹的页面动效：进入浮入，返回从下方回位。只动内容区，路径栏不动。 */
+.shelf-level-page {
+  transform-origin: 50% 240px;
+}
+
+.shelf-level-page[data-level-nav="forward"] {
+  animation: page-arrive var(--page-in) var(--ease-emphasized) both;
+}
+
+.shelf-level-page[data-level-nav="back"] {
+  animation: shelf-level-return var(--page-out) var(--ease-standard) both;
+}
+
+@keyframes shelf-level-return {
+  from { opacity: 0; transform: scale(var(--page-under)); }
+}

@@ -518,9 +518,63 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
                   : t("folderImport.into.root", { remaining: remainingNewLevels })}
               </small>
             </div>
+            <div className="folder-import-opts">
+              <label className="folder-import-opt">
+                <span>{t("folderImport.grouping")}</span>
+                <select
+                  value={options.grouping}
+                  onChange={(event) => setOptions({ ...options, grouping: event.target.value as typeof options.grouping })}
+                >
+                  <option value="auto">{t("folderImport.grouping.auto")}</option>
+                  <option value="singleFolder">{t("folderImport.grouping.single", { name: rootName })}</option>
+                  <option value="none">{t("folderImport.grouping.none")}</option>
+                </select>
+              </label>
+              {options.grouping === "auto" && hasLooseAndCategories && (
+                <label className="folder-import-opt">
+                  <span>{t("folderImport.loose", { name: rootName })}</span>
+                  <select
+                    value={options.looseRootBooks}
+                    onChange={(event) => setOptions({ ...options, looseRootBooks: event.target.value as typeof options.looseRootBooks })}
+                  >
+                    <option value="namedFolder">{t("folderImport.loose.namedFolder", { name: rootName })}</option>
+                    <option value="root">{t("folderImport.loose.unclassified")}</option>
+                  </select>
+                </label>
+              )}
+              {options.grouping !== "none" && (
+                <label className="folder-import-opt">
+                  <span>{t("folderImport.existing")}</span>
+                  <select
+                    value={options.existingPlacement}
+                    onChange={(event) => setOptions({ ...options, existingPlacement: event.target.value as typeof options.existingPlacement })}
+                  >
+                    <option value="fillUnclassified">{t("folderImport.existing.fill")}</option>
+                    <option value="preserveAll">{t("folderImport.existing.preserve")}</option>
+                    <option value="replace">{t("folderImport.existing.replace")}</option>
+                  </select>
+                </label>
+              )}
+              {copyToLibrary !== undefined && (
+                <label className="folder-import-opt is-check folder-import-copy" title={t("folderImport.copy.hint")}>
+                  <input
+                    type="checkbox"
+                    checked={copyToLibrary}
+                    onChange={(event) => { setCopyChoice(event.target.checked); props.onCopyToLibraryChange?.(event.target.checked); }}
+                  />
+                  <span>{t("shelf.import.copy")}</span>
+                </label>
+              )}
+            </div>
+            <p className="folder-import-opts-hint">
+              {t(options.grouping === "auto" ? "folderImport.grouping.auto.hint" : options.grouping === "singleFolder" ? "folderImport.grouping.single.hint" : "folderImport.grouping.none.hint")}
+              {options.grouping !== "none" && (
+                <>；{t(options.existingPlacement === "fillUnclassified" ? "folderImport.existing.fill.hint" : options.existingPlacement === "preserveAll" ? "folderImport.existing.preserve.hint" : "folderImport.existing.replace.hint")}</>
+              )}
+            </p>
             <ScanNotes scan={phase.scan} />
             {merged && (
-              <p className="folder-import-warning">
+              <p className="folder-import-note">
                 {t("folderImport.merged", { directories: merged.directories, books: merged.books, name: merged.targetName || rootName })}
               </p>
             )}
@@ -532,11 +586,12 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
                   <span className="folder-import-hint">{t("folderImport.treeHint")}</span>
                 </div>
                 {unresolved.length > 0 && (
-                  <p className="folder-import-warning">{tn("folderImport.unresolved", unresolved.length, { count: unresolved.length })}</p>
+                  <p className="folder-import-note">{tn("folderImport.unresolved", unresolved.length, { count: unresolved.length })}</p>
                 )}
                 <ul className="folder-import-tree">
                   {anchorName && (
                     <li className="folder-import-tree-row is-anchor">
+                      <span className="folder-import-tree-indent" aria-hidden="true" />
                       <span className="folder-import-tree-icon" aria-hidden="true"><FolderIcon /></span>
                       <span className="folder-import-group-name">
                         <strong>{anchorName}</strong>
@@ -559,8 +614,8 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
                       <li
                         key={group.groupKey}
                         className={`folder-import-tree-row${choice ? "" : " is-unresolved"}${fifth ? " is-fifth" : ""}`}
-                        style={{ paddingLeft: `${12 + rowDepth * 18 + (anchorName ? 18 : 0)}px` }}
                       >
+                        <span className="folder-import-tree-indent" aria-hidden="true" style={{ width: `${(rowDepth + (anchorName ? 1 : 0)) * 22}px` }} />
                         <span className="folder-import-tree-icon" aria-hidden="true"><FolderIcon /></span>
                         <span className="folder-import-group-name">
                           <strong title={[rootName, ...group.sourceSegments].join(" / ")}>
@@ -605,85 +660,6 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
                 )}
               </div>
             )}
-            <fieldset className="save-file-fieldset">
-              <legend>{t("folderImport.grouping")}</legend>
-              {([
-                ["auto", t("folderImport.grouping.auto"), t("folderImport.grouping.auto.hint")],
-                ["singleFolder", t("folderImport.grouping.single", { name: rootName }), t("folderImport.grouping.single.hint")],
-                ["none", t("folderImport.grouping.none"), t("folderImport.grouping.none.hint")],
-              ] as const).map(([value, label, hint]) => (
-                <label key={value} className="save-file-radio">
-                  <input
-                    type="radio"
-                    name="folder-import-grouping"
-                    checked={options.grouping === value}
-                    onChange={() => setOptions({ ...options, grouping: value })}
-                  />
-                  <span>{label}<span className="folder-import-hint">{hint}</span></span>
-                </label>
-              ))}
-            </fieldset>
-
-            {options.grouping === "auto" && hasLooseAndCategories && (
-              <fieldset className="save-file-fieldset">
-                <legend>{t("folderImport.loose", { name: rootName })}</legend>
-                <label className="save-file-radio">
-                  <input
-                    type="radio"
-                    name="folder-import-loose"
-                    checked={options.looseRootBooks === "root"}
-                    onChange={() => setOptions({ ...options, looseRootBooks: "root" })}
-                  />
-                  <span>{t("folderImport.loose.unclassified")}</span>
-                </label>
-                <label className="save-file-radio">
-                  <input
-                    type="radio"
-                    name="folder-import-loose"
-                    checked={options.looseRootBooks === "namedFolder"}
-                    onChange={() => setOptions({ ...options, looseRootBooks: "namedFolder" })}
-                  />
-                  <span>{t("folderImport.loose.namedFolder", { name: rootName })}</span>
-                </label>
-              </fieldset>
-            )}
-
-            {options.grouping !== "none" && (
-              <fieldset className="save-file-fieldset">
-                <legend>{t("folderImport.existing")}</legend>
-                {([
-                  ["fillUnclassified", t("folderImport.existing.fill"), t("folderImport.existing.fill.hint")],
-                  ["preserveAll", t("folderImport.existing.preserve"), t("folderImport.existing.preserve.hint")],
-                  ["replace", t("folderImport.existing.replace"), t("folderImport.existing.replace.hint")],
-                ] as const).map(([value, label, hint]) => (
-                  <label key={value} className="save-file-radio">
-                    <input
-                      type="radio"
-                      name="folder-import-existing"
-                      checked={options.existingPlacement === value}
-                      onChange={() => setOptions({ ...options, existingPlacement: value })}
-                    />
-                    <span>{label}<span className="folder-import-hint">{hint}</span></span>
-                  </label>
-                ))}
-              </fieldset>
-            )}
-
-            {copyToLibrary !== undefined && (
-              <fieldset className="save-file-fieldset">
-                <legend>{t("shelfSettings.library")}</legend>
-                <label className="save-file-radio folder-import-copy">
-                  <input
-                    type="checkbox"
-                    checked={copyToLibrary}
-                    onChange={(event) => { setCopyChoice(event.target.checked); props.onCopyToLibraryChange?.(event.target.checked); }}
-                  />
-                  <span>{t("shelf.import.copy")}<span className="folder-import-hint">{t("folderImport.copy.hint")}</span></span>
-                </label>
-              </fieldset>
-            )}
-
-            <p className="save-file-muted">{t("folderImport.duplicatesNote")}</p>
           </div>
         )}
 
@@ -744,6 +720,7 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
             <button type="button" onClick={close}>{t("folderImport.cancel")}</button>
           ) : phase.kind === "preview" ? (
             <>
+              <span className="folder-import-foot-note">{t("folderImport.duplicatesNote")}</span>
               <button type="button" onClick={close}>{t("folderImport.cancel")}</button>
               <button type="button" onClick={() => void pickAndScan()}>{t("folderImport.rechoose")}</button>
               <button type="button" className="primary" disabled={unresolved.length > 0} onClick={startImport}>

@@ -6295,3 +6295,79 @@ select option {
   justify-content: flex-start;
   border-style: solid;
 }
+
+/* ER-0170 整改：文件夹卡片的封面拼图按本数换格数，书少时不再缩在一角。 */
+.shelf-folder-mosaic.shelf-folder-mosaic-2x2 {
+  grid-template-columns: repeat(2, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.shelf-folder-mosaic.shelf-folder-mosaic-1 {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+  padding: 6px 10px;
+  box-sizing: border-box;
+}
+
+.shelf-folder-mosaic.shelf-folder-mosaic-2x2 {
+  grid-template-rows: none;
+  grid-auto-rows: auto;
+  align-content: center;
+}
+
+.shelf-folder-mosaic.shelf-folder-mosaic-1 .shelf-folder-mosaic-cell {
+  aspect-ratio: auto;
+  height: 100%;
+}
+
+/* ER-0170 整改：移动目标弹窗的间距与底部按钮。 */
+.shelf-confirm.shelf-move-dialog {
+  width: min(460px, calc(100vw - 32px));
+  max-width: none;
+}
+
+.shelf-move-subtitle {
+  margin: 6px 0 4px;
+}
+
+.shelf-move-dialog .shelf-move-list {
+  gap: 2px;
+}
+
+.shelf-move-dialog button.shelf-move-item {
+  min-height: 40px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.shelf-move-dialog button.shelf-move-item.disabled {
+  cursor: not-allowed;
+  color: var(--muted);
+}
+
+.shelf-move-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shelf-move-actions {
+  flex-wrap: wrap;
+}
+
+.shelf-move-actions .shelf-move-new-btn {
+  border: 0;
+  padding: 8px 4px;
+  background: transparent;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.shelf-move-actions .shelf-selection-cancel,
+.shelf-move-actions .shelf-confirm-primary {
+  flex: none;
+  white-space: nowrap;
+}

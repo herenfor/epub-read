@@ -495,7 +495,7 @@ export const ShelfFolderCard = memo(function ShelfFolderCard(props: ShelfFolderC
             <FolderIcon />
           </div>
         ) : (
-          <div className="shelf-folder-mosaic shelf-folder-mosaic-3x3">
+          <div className={`shelf-folder-mosaic ${sampleBooks.length === 1 ? "shelf-folder-mosaic-1" : sampleBooks.length <= 4 ? "shelf-folder-mosaic-2x2" : "shelf-folder-mosaic-3x3"}`}>
             {sampleBooks.map((b) => (
               <div key={b.id} className="shelf-folder-mosaic-cell">
                 <Cover entry={b} provider={props.provider} />
