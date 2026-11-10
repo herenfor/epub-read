@@ -1735,74 +1735,9 @@ impl PortableStore {
         visible_hashes: Vec<String>,
         is_new_hashes: Vec<String>,
     ) -> PortableResult<()> {
-        let parsed = legacy::parse_legacy_records(records)?;
-        for (hash, raw) in &bindings {
-            if !dto::valid_content_hash(hash) {
-                return Err(PortableError::invalid_entity(
-                    "invalid-entity：binding contentHash 必须是 64 位小写内容指纹",
-                ));
-            }
-            serde_json::from_str::<serde_json::Value>(raw).map_err(|error| {
-                PortableError::invalid_data(format!("invalid-data：设备绑定不是合法 JSON：{error}"))
-            })?;
-        }
-        for hash in visible_hashes.iter().chain(is_new_hashes.iter()) {
-            if !dto::valid_content_hash(hash) {
-                return Err(PortableError::invalid_entity(
-                    "invalid-entity：本机标记 contentHash 必须是 64 位小写内容指纹",
-                ));
-            }
-        }
-
-        let transaction = self.connection.unchecked_transaction()?;
-        let installation_id = ensure_installation_id(&transaction)?;
-        let mut counter = load_counter(&transaction)?;
-
-        let mut new_records = Vec::new();
-        for record in parsed {
-            if !book_meta_exists(&transaction, record.content_hash())? {
-                new_records.push(record);
-            }
-        }
-
-        if !new_records.is_empty() {
-            let empty_state = PortableStateV3 {
-                schema_version: 3,
-                books: BTreeMap::new(),
-                organization: empty_organization(),
-                preferences: None,
-            };
-            let incoming = legacy::build_import_state(
-                &empty_state,
-                &new_records,
-                &empty_organization(),
-                &mut counter,
-                &installation_id,
-            )?;
-            for (book_hash, book) in &incoming.books {
-                store_book_shape(&transaction, book_hash, book, &BTreeMap::new())?;
-            }
-        }
-
-        for (hash, raw) in &bindings {
-            transaction.execute(
-                "INSERT INTO device_bindings(hash, json) VALUES(?1, ?2)
-                 ON CONFLICT(hash) DO UPDATE SET json = excluded.json",
-                params![hash, raw],
-            )?;
-        }
-        if !visible_hashes.is_empty() {
-            let mut visible = load_local_visible_hashes(&transaction)?;
-            visible.extend(visible_hashes);
-            save_local_visible_hashes(&transaction, &visible)?;
-        }
-        if !is_new_hashes.is_empty() {
-            let mut is_new = load_local_is_new_hashes(&transaction)?;
-            is_new.extend(is_new_hashes);
-            save_local_is_new_hashes(&transaction, &is_new)?;
-        }
-        store_counter(&transaction, counter)?;
-        transaction.commit()?;
+        let tx = self.connection.unchecked_transaction()?;
+        publish_import_rows(&tx, records, bindings, visible_hashes, is_new_hashes)?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -3139,4 +3074,75 @@ mod directory_import_batch_tests {
         assert!(store.local_is_new_hashes().unwrap().contains(&HASH_A.to_string()));
     }
 
+}
+
+fn publish_import_rows(connection: &rusqlite::Connection, records: Vec<serde_json::Value>, bindings: Vec<(String, String)>, visible_hashes: Vec<String>, is_new_hashes: Vec<String>) -> PortableResult<()> {
+        let parsed = legacy::parse_legacy_records(records)?;
+        for (hash, raw) in &bindings {
+            if !dto::valid_content_hash(hash) {
+                return Err(PortableError::invalid_entity(
+                    "invalid-entity：binding contentHash 必须是 64 位小写内容指纹",
+                ));
+            }
+            serde_json::from_str::<serde_json::Value>(raw).map_err(|error| {
+                PortableError::invalid_data(format!("invalid-data：设备绑定不是合法 JSON：{error}"))
+            })?;
+        }
+        for hash in visible_hashes.iter().chain(is_new_hashes.iter()) {
+            if !dto::valid_content_hash(hash) {
+                return Err(PortableError::invalid_entity(
+                    "invalid-entity：本机标记 contentHash 必须是 64 位小写内容指纹",
+                ));
+            }
+        }
+
+        let transaction = connection;
+        let installation_id = ensure_installation_id(&transaction)?;
+        let mut counter = load_counter(&transaction)?;
+
+        let mut new_records = Vec::new();
+        for record in parsed {
+            if !book_meta_exists(&transaction, record.content_hash())? {
+                new_records.push(record);
+            }
+        }
+
+        if !new_records.is_empty() {
+            let empty_state = PortableStateV3 {
+                schema_version: 3,
+                books: BTreeMap::new(),
+                organization: empty_organization(),
+                preferences: None,
+            };
+            let incoming = legacy::build_import_state(
+                &empty_state,
+                &new_records,
+                &empty_organization(),
+                &mut counter,
+                &installation_id,
+            )?;
+            for (book_hash, book) in &incoming.books {
+                store_book_shape(&transaction, book_hash, book, &BTreeMap::new())?;
+            }
+        }
+
+        for (hash, raw) in &bindings {
+            transaction.execute(
+                "INSERT INTO device_bindings(hash, json) VALUES(?1, ?2)
+                 ON CONFLICT(hash) DO UPDATE SET json = excluded.json",
+                params![hash, raw],
+            )?;
+        }
+        if !visible_hashes.is_empty() {
+            let mut visible = load_local_visible_hashes(&transaction)?;
+            visible.extend(visible_hashes);
+            save_local_visible_hashes(&transaction, &visible)?;
+        }
+        if !is_new_hashes.is_empty() {
+            let mut is_new = load_local_is_new_hashes(&transaction)?;
+            is_new.extend(is_new_hashes);
+            save_local_is_new_hashes(&transaction, &is_new)?;
+        }
+        store_counter(&transaction, counter)?;
+        Ok(())
 }

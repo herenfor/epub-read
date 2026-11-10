@@ -538,3 +538,103 @@ fn readest_session_commits_in_batches_until_cancelled() {
     });
     assert_eq!(late.unwrap_err().code, "cancelled");
 }
+
+fn bundle_original(hash: &str) -> (serde_json::Value, String, String, Option<String>) {
+    let metadata = crate::linked_library::ImportedMetadata { title: "New synthetic".into(), creator: "".into(), language: "".into(), spine: vec!["chapter.xhtml".into()], cover_zip_path: None, cover_mime: "".into() };
+    (serde_json::to_value(crate::linked_library::make_managed_record(hash.into(), "new.epub".into(), &metadata)).unwrap(), hash.into(), "{}".into(), None)
+}
+fn pending_target(store: &PortableStore, hash: &str) -> ReadestTarget {
+    ReadestTarget { book_hash: hash.into(), metadata_stamp: Stamp { device_id: ID.into(), counter: 0 }, binding: "{}".into(), progress_revision: 0,
+        progress: ProgressProjection { versions: vec![], display: None, conflict: false }, generation: store.runtime_generation().into() }
+}
+#[test]
+fn readest_bundle_rolls_back_new_book_and_existing_records_on_invalid_note_or_cancel() {
+    let mut store = store();
+    let hash = "c".repeat(64);
+    let before = store.snapshot().unwrap();
+    let visible = store.local_visible_hashes().unwrap();
+    let mut bad = plan(9); bad.book_hash = hash.clone(); bad.notes[0].value.selected_text = "".into();
+    let existing = (store.readest_target(HASH).unwrap(), plan(5));
+    let pending = pending_target(&store, &hash);
+    let originals = vec![bundle_original(&hash)];
+    let result = store.import_readest_bundle(&[existing.clone(), (pending.clone(), bad)], &originals, 100, &|| false, |tx, _| { tx.commit()?; Ok(()) });
+    assert!(result.is_err());
+    assert_eq!(store.snapshot().unwrap(), before);
+    assert_eq!(store.local_visible_hashes().unwrap(), visible);
+    assert!(store.binding_raw(&hash).unwrap().is_none());
+    let mut new = plan(9); new.book_hash = hash.clone();
+    let session = active();
+    let result = store.import_readest_bundle(&[existing, (pending, new)], &originals, 100, &|| false, |tx, _| {
+        session.close()?;
+        session.finish(tx, &|| true, &[])
+    });
+    assert_eq!(result.unwrap_err().code, "cancelled");
+    assert_eq!(store.snapshot().unwrap(), before);
+    assert!(store.binding_raw(&hash).unwrap().is_none());
+}
+#[test]
+fn readest_bundle_publishes_book_binding_and_records_together_and_preserves_duplicates() {
+    let mut store = store();
+    let hash = "c".repeat(64);
+    let mut book = plan(9); book.book_hash = hash.clone();
+    let pending = pending_target(&store, &hash);
+    let session = active();
+    let outcome = store.import_readest_bundle(&[(pending, book.clone())], &[bundle_original(&hash)], 100, &|| false, |tx, _| session.finish(tx, &|| true, &[])).unwrap();
+    assert_eq!(outcome.books_added, 1);
+    assert_eq!(outcome.notes_added, 1);
+    assert!(store.binding_raw(&hash).unwrap().is_some());
+    assert!(store.local_visible_hashes().unwrap().contains(&hash));
+    let before = store.snapshot().unwrap();
+    let target = store.readest_target(&hash).unwrap();
+    let outcome = store.import_readest_bundle(&[(target, book)], &[bundle_original(&hash)], 101, &|| false, |tx, _| { tx.commit()?; Ok(()) }).unwrap();
+    assert_eq!(outcome.books_added, 0);
+    assert_eq!(outcome.skipped_existing, 2);
+    assert_eq!(store.snapshot().unwrap(), before);
+}
+#[test]
+fn readest_prepared_original_rejects_wrong_digest_and_cancellation_before_publication() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("original.txt");
+    std::fs::write(&path, b"hello").unwrap();
+    let correct = "5d41402abc4b2a76b9719d911017c592";
+    let (hash, _) = super::intake::verify_original(&path, correct, &|| false).unwrap();
+    assert_eq!(hash, "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
+    assert_eq!(super::intake::verify_original(&path, REMOTE, &|| false).unwrap_err().code, "source-mismatch");
+    assert_eq!(super::intake::verify_original(&path, correct, &|| true).unwrap_err().code, "cancelled");
+    assert_eq!(std::fs::read(&path).unwrap(), b"hello");
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+}
+
+#[test]
+fn readest_bundle_repairs_a_missing_binding_without_replacing_existing_records() {
+    let mut store = store();
+    commit(&mut store, plan(4));
+    let before = store.snapshot().unwrap();
+    let mut replacement = bundle_original(HASH);
+    replacement.2 = "{\"managedFileName\":\"new-copy.epub\"}".into();
+    replacement.3 = store.binding_raw(HASH).unwrap();
+    let result = store.import_readest_bundle(&[], &[replacement.clone()], 101, &|| false, |tx, published| {
+        assert!(published.contains(HASH));
+        tx.commit()?; Ok(())
+    }).unwrap();
+    assert_eq!(result.books_added, 0);
+    assert_eq!(store.snapshot().unwrap(), before);
+    assert_eq!(store.binding_raw(HASH).unwrap(), Some(replacement.2.clone()));
+    // A stale repair cannot overwrite a binding another operation has since changed.
+    assert_eq!(store.import_readest_bundle(&[], &[replacement], 102, &|| false, |tx, _| { tx.commit()?; Ok(()) }).unwrap_err().code, "stale-basis");
+}
+
+#[test]
+fn readest_match_token_cannot_be_reused_for_another_source_identity() {
+    let store = store();
+    let target = store.readest_target(HASH).unwrap();
+    let mut data = SessionData::default();
+    let mut book = plan(3);
+    data.targets.insert(HASH.into(), StoredTarget { token: book.target_token.clone(), partial_md5: REMOTE.into(), target });
+    assert!(matched_target(&data, &book).is_ok());
+    book.readest_hash = "d".repeat(32);
+    assert_eq!(matched_target(&data, &book).err().unwrap().code, "source-mismatch");
+    book.readest_hash = REMOTE.into();
+    book.target_token = "old-token".into();
+    assert_eq!(matched_target(&data, &book).err().unwrap().code, "stale-basis");
+}

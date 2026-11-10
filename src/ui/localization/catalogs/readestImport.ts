@@ -66,12 +66,13 @@ export const readestImport = defineMessages("readestImport", {
   "readestImport.unplaced.bookmark": "书签",
   "readestImport.unplaced.note": "高亮或笔记",
 
+  "readestImport.fail.mismatch": "书文件与 Readest 指纹不符，本次没有加入书架",
   "readestImport.fail.noFile": "来源里找不到它的书文件",
   "readestImport.fail.storage": "存储空间不足或无法写入",
   "readestImport.fail.unreadable": "书文件读不出来",
   "readestImport.fail.notAdded": "没能加入书架",
-  "readestImport.fail.records": "书已在书架上，但阅读记录读不出来",
-  "readestImport.fail.tooMany": "书已在书架上，但阅读记录太多，没有迁入",
+  "readestImport.fail.records": "阅读记录读不出来，本次迁入尚未提交",
+  "readestImport.fail.tooMany": "阅读记录超出本批限制，本次迁入尚未提交",
 
   "readestImport.error.notReadest": "这里面没有 Readest 的书库。请选 Readest 导出的备份，或它的数据文件夹",
   "readestImport.error.invalid": "这份 Readest 资料无法读取或已损坏",

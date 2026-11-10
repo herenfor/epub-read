@@ -144,6 +144,7 @@ pub(crate) use library_location::{
 };
 
 mod archive;
+pub(crate) use archive::register_archive;
 use archive::*;
 pub(crate) use archive::{
     close_native_archive_window,

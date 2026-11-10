@@ -1,7 +1,7 @@
 /**
  * Owns one Readest import from the source screen to the result screen. Books
- * move one at a time: a new book is added to the shelf and its records follow,
- * so stopping never leaves a book half imported. Every exit path closes the
+ * are prepared off-shelf and published with all converted records in one transaction.
+ * Stopping before that transaction commits leaves the shelf unchanged. Every exit path closes the
  * native session; an open that returns after the dialog was abandoned is
  * closed, not shown.
  */
@@ -15,9 +15,10 @@ import {
   probeReadestLibrary,
   readReadestEntryText,
   readestImportTargets,
-  releaseReadestBooks,
   stageReadestBooks,
   READEST_TARGET_BATCH,
+  READEST_COMMIT_MAX_BOOKS,
+  READEST_COMMIT_MAX_RECORDS,
   type ReadestBookFile,
   type ReadestBookImportPayload,
   type ReadestImportScope,
@@ -31,7 +32,6 @@ import { getShelfStore, type ShelfEntry, type ShelfStore } from "../shelf";
 import { activeShelfSpace, subscribeShelfSpace } from "../shelfSpaces";
 import type { ShelfNotice } from "../useShelfLibrary";
 import { parseReadestBookConfig, parseReadestLibrary, type ReadestLibraryBook } from "./readestBackup";
-import { intakeStagedBooks } from "./readestBookIntake";
 import { convertReadestBook } from "./readestConvert";
 import { openReadestTarget } from "./readestLocalTarget";
 import {
@@ -39,7 +39,6 @@ import {
   bookPayload,
   emptyResult,
   importRows,
-  isLocalEpub,
   localImportBooks,
   stageChunks,
   type ImportResult,
@@ -78,8 +77,6 @@ export interface ReadestImportDeps {
 
 const IMPORT_SLOT = "readest-import";
 /** Records are committed in small transactions so one bad book cannot sink many. */
-const COMMIT_BOOKS = 24;
-const COMMIT_RECORDS = 4000;
 
 function scopeFor(store: ShelfStore): ReadestImportScope | null {
   if (activeShelfSpace().kind !== "private") return { kind: "public" };
@@ -95,6 +92,7 @@ export function readestErrorText(error: unknown): string {
     case "invalid-backup": case "invalid-data": case "invalid-entity": case "invalid-request":
       return uiText("readestImport.error.invalid");
     case "too-large": return uiText("readestImport.error.tooLarge");
+    case "source-mismatch": return uiText("readestImport.fail.mismatch");
     case "source-changed": case "stale-basis": return uiText("readestImport.error.changed");
     case "source-unavailable": return uiText("readestImport.error.unavailable");
     case "reader-busy": return uiText("readestImport.error.readerBusy");
@@ -110,6 +108,7 @@ const endsRun = (error: unknown): boolean =>
   ["cancelled", "locked", "session-closed", "repository-unavailable"].includes(saveFileErrorCode(error) ?? "");
 
 function stagingFailure(code: string | null, message: string | null): string {
+  if (code === "source-mismatch") return uiText("readestImport.fail.mismatch");
   if (code === "no-file" || code === "source-unavailable") return uiText("readestImport.fail.noFile");
   if (code === "storage-error") return uiText("readestImport.fail.storage");
   if (code) return uiText("readestImport.fail.unreadable");
@@ -122,7 +121,6 @@ export function useReadestImport({ shelfEntriesRef, refreshShelfProjection, setS
   const generationRef = useRef(0);
   /** Set by "stop": the run ends at the next book boundary. */
   const stopRef = useRef(false);
-  const stagingRef = useRef(false);
   const canPickFolder = platform !== "android" && platform !== "web";
 
   const release = useCallback((session: Session | null): void => {
@@ -295,6 +293,10 @@ export function useReadestImport({ shelfEntriesRef, refreshShelfProjection, setS
     const { rule, sourceLabel } = state;
     const chosen = state.rows.filter((row) => row.selected && row.kind !== "unavailable");
     if (chosen.length === 0) return;
+    if (chosen.length > READEST_COMMIT_MAX_BOOKS) {
+      setShelfNotice({ kind: "warn", text: uiText("readestImport.error.tooLarge") });
+      return;
+    }
     if (importSlotRef.current || shelfBusyRef.current) {
       setShelfNotice({ kind: "warn", text: uiText("notice.import.busy") });
       return;
@@ -314,47 +316,30 @@ export function useReadestImport({ shelfEntriesRef, refreshShelfProjection, setS
     };
 
     let batch: Array<{ title: string; payload: ReadestBookImportPayload; records: number }> = [];
+    const stagedHashes: string[] = [];
     const commitBooks = async (items: typeof batch): Promise<void> => {
-      const outcome = await commitReadestImport(session.id, items.map((item) => item.payload));
+      const outcome = await commitReadestImport(session.id, items.map((item) => item.payload), undefined, stagedHashes);
       addOutcome(result, outcome);
+      result.booksAdded = outcome.booksAdded ?? 0;
+      result.booksAlready = outcome.booksAlready ?? 0;
       changed = true;
     };
     const flush = async (): Promise<void> => {
-      const items = batch;
-      batch = [];
-      if (items.length === 0) return;
-      try {
-        await commitBooks(items);
-      } catch (error) {
-        if (endsRun(error) || items.length === 1) {
-          if (endsRun(error)) throw error;
-          result.failed.push({ title: items[0].title, reason: readestErrorText(error) });
-          return;
-        }
-        // One book spoiled the transaction: commit them one by one to find it.
-        for (const item of items) {
-          try {
-            await commitBooks([item]);
-          } catch (single) {
-            if (endsRun(single)) throw single;
-            result.failed.push({ title: item.title, reason: readestErrorText(single) });
-          }
-        }
-      }
+      if (stopRef.current || !current(session)) return;
+      if (batch.length || stagedHashes.length) await commitBooks(batch);
     };
     /** Read, convert and queue one book's records against its shelf book. */
-    const queueRecords = async (row: ImportRow, local: LocalImportBook): Promise<void> => {
+    const queueRecords = async (row: ImportRow, local: LocalImportBook, staged = false): Promise<void> => {
       try {
         // Entries are read one at a time to EOF, never interleaved.
         const entry = await findReadestConfig(session.id, row.readestHash);
         if (!entry) return;
         const parsed = parseReadestBookConfig(await readReadestEntryText(session.id, entry));
         if (!parsed.ok) {
-          result.failed.push({ title: row.title, reason: uiText("readestImport.fail.records") });
-          return;
+          throw new Error(uiText("readestImport.fail.records"));
         }
         result.unsupported += parsed.value.skipped.filter((item) => item.reason !== "deleted").length;
-        const opened = await openReadestTarget(store, local);
+        const opened = await openReadestTarget(store, local, staged ? { sessionId: session.id, readestHash: row.readestHash } : undefined);
         let preview;
         try {
           preview = await convertReadestBook(row.readestHash, parsed.value, opened.target, Date.now());
@@ -365,13 +350,14 @@ export function useReadestImport({ shelfEntriesRef, refreshShelfProjection, setS
         result.unplaced.push(...built.unplaced);
         if (built.payload) {
           batch.push({ title: row.title, payload: built.payload, records: built.records });
-          if (batch.length >= COMMIT_BOOKS || batch.reduce((sum, item) => sum + item.records, 0) >= COMMIT_RECORDS) await flush();
+          if (batch.reduce((sum, item) => sum + item.records, 0) > READEST_COMMIT_MAX_RECORDS) throw new Error(uiText("readestImport.fail.tooMany"));
         } else if (built.records > 0) {
-          result.failed.push({ title: row.title, reason: uiText("readestImport.fail.tooMany") });
+          throw new Error(uiText("readestImport.fail.tooMany"));
         }
       } catch (error) {
         if (endsRun(error)) throw error;
         result.failed.push({ title: row.title, reason: readestErrorText(error) });
+        throw error;
       }
     };
 
@@ -383,51 +369,34 @@ export function useReadestImport({ shelfEntriesRef, refreshShelfProjection, setS
         await queueRecords(row, row.local!);
         done += 1;
       }
-      await flush();
 
       // New books: stage a few, add them to the shelf, then their records.
       for (const chunk of stageChunks(chosen.filter((item) => item.kind === "new"))) {
         if (stopRef.current || !current(session)) break;
         show(chunk[0].title);
-        stagingRef.current = true;
-        let staged;
-        try {
-          staged = await stageReadestBooks(session.id, chunk.map((row) => row.readestHash), (progress) => {
-            show(chunk[Math.min(progress.completed, chunk.length - 1)].title, progress.bytesDone, progress.bytesTotal, progress.completed);
-          });
-        } finally {
-          stagingRef.current = false;
-        }
+        const staged = await stageReadestBooks(session.id, chunk.map((row) => row.readestHash), (progress) => {
+          show(chunk[Math.min(progress.completed, chunk.length - 1)].title, progress.bytesDone, progress.bytesTotal, progress.completed);
+        });
         if (!current(session)) break;
-        const intake = await intakeStagedBooks(store, staged, crypto.randomUUID());
-        void releaseReadestBooks(session.id).catch(() => undefined);
-        const added: Array<{ row: ImportRow; entry: ShelfEntry }> = [];
         for (const row of chunk) {
-          const item = intake.get(row.readestHash);
-          if (!item || item.status === "failed" || !item.entry) {
-            result.failed.push({ title: row.title, reason: stagingFailure(item?.errorCode ?? null, item?.error ?? null) });
-            continue;
+          if (stopRef.current || !current(session)) break;
+          const item = staged.find((item) => item.readestHash === row.readestHash);
+          if (!item || item.errorCode || !item.bookHash || !item.targetToken || !item.fileName) {
+            const message = stagingFailure(item?.errorCode ?? null, null);
+            result.failed.push({ title: row.title, reason: message });
+            throw new Error(message);
           }
-          if (item.status === "saved") result.booksAdded += 1;
-          else result.booksAlready += 1;
-          changed = true;
-          added.push({ row, entry: item.entry });
+          stagedHashes.push(row.readestHash);
+          const local: LocalImportBook = {
+            id: item.bookHash, bookHash: item.bookHash, title: row.title, fileName: item.fileName,
+            partialMd5: row.readestHash, targetToken: item.targetToken,
+            progressPct: item.progress?.display?.value?.progressPctHint ?? null,
+          };
+          if (row.records) await queueRecords(row, local, true);
         }
-        const withRecords = added.filter(({ row, entry }) => row.records && entry.contentHash && isLocalEpub(entry.fileName));
-        if (withRecords.length > 0 && current(session)) {
-          const candidates = await readestImportTargets(session.id, withRecords.map(({ entry }) => entry.contentHash!));
-          const locals = localImportBooks(withRecords.map(({ entry }) => entry), candidates);
-          for (const { row, entry } of withRecords) {
-            if (!current(session)) break;
-            show(row.title);
-            const local = locals.find((book) => book.id === entry.id);
-            if (local) await queueRecords(row, local);
-            else result.failed.push({ title: row.title, reason: uiText("readestImport.fail.records") });
-          }
-        }
-        await flush();
         done += chunk.length;
       }
+      await flush();
     } catch (error) {
       // "Stop" during staging closes the source; that is the expected way out.
       if (!stopRef.current) result.error = readestErrorText(error);
@@ -439,7 +408,7 @@ export function useReadestImport({ shelfEntriesRef, refreshShelfProjection, setS
     // A run abandoned by a shelf switch still marked sync dirty, but its UI is gone.
     if (!current(session)) return;
     result.stopped = stopRef.current;
-    result.notReached = Math.max(0, total - done);
+    result.notReached = (result.stopped || result.error) && !changed ? total : Math.max(0, total - done);
     release(session);
     if (changed) {
       try {
@@ -458,7 +427,9 @@ export function useReadestImport({ shelfEntriesRef, refreshShelfProjection, setS
     stopRef.current = true;
     setState({ ...state, stopping: true });
     const session = sessionRef.current;
-    if (session && stagingRef.current) void closeReadestBackup(session.id).catch(() => undefined);
+    if (session) void closeReadestBackup(session.id).then((status) => {
+      if (current(session) && status === "committed") stopRef.current = false;
+    }).catch(() => undefined);
   }, [state]);
 
   const cancel = useCallback((): void => {

@@ -40,6 +40,8 @@ pub(crate) struct ReadestBookImport {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ReadestImportOutcome {
     pub imported_books: usize,
+    pub books_added: usize,
+    pub books_already: usize,
     pub bookmarks_added: usize,
     pub notes_added: usize,
     pub progress_written: usize,
@@ -232,11 +234,23 @@ impl PortableStore {
         cancelled: &dyn Fn() -> bool,
         finish: impl FnOnce(rusqlite::Transaction<'_>) -> PortableResult<()>,
     ) -> PortableResult<ReadestImportOutcome> {
+        if books.is_empty() { return Err(PortableError::invalid_data("迁入批次为空")); }
+        self.import_readest_bundle(books, &[], now, cancelled, |tx, _| finish(tx))
+    }
+
+    pub(crate) fn import_readest_bundle(
+        &mut self,
+        books: &[(ReadestTarget, ReadestBookImport)],
+        originals: &[(serde_json::Value, String, String, Option<String>)],
+        now: u64,
+        cancelled: &dyn Fn() -> bool,
+        finish: impl FnOnce(rusqlite::Transaction<'_>, &BTreeSet<String>) -> PortableResult<()>,
+    ) -> PortableResult<ReadestImportOutcome> {
         let record_count: usize = books
             .iter()
             .map(|(_, b)| b.bookmarks.len() + b.notes.len() + usize::from(b.progress.is_some()))
             .sum();
-        if books.is_empty() || books.len() > 128 || record_count > 20000 || !dto::safe_time(now) {
+        if books.len() > 10000 || originals.len() > 10000 || record_count > 20000 || !dto::safe_time(now) {
             return Err(PortableError::invalid_data("迁入批次超出范围"));
         }
         let mut seen = BTreeSet::new();
@@ -252,6 +266,33 @@ impl PortableStore {
             }
         }
         let transaction = self.connection.unchecked_transaction()?;
+        let mut fresh = BTreeSet::new();
+        let mut published = BTreeSet::new();
+        for (_, hash, _, expected) in originals {
+            let exists = book_meta_exists(&transaction, hash)?;
+            match expected {
+                Some(old) => {
+                    let current: Option<String> = transaction.query_row("SELECT json FROM device_bindings WHERE hash=?1", [hash], |r| r.get(0)).optional()?;
+                    if !exists || current.as_ref() != Some(old) { return Err(PortableError::stale_basis("原书绑定已变化，请重新迁入")); }
+                    published.insert(hash.clone());
+                }
+                None if !exists => { fresh.insert(hash.clone()); published.insert(hash.clone()); }
+                None => {} // A concurrent import won. Its binding and records stay untouched.
+            }
+        }
+        // Validate every existing target before the optional source-binding repair.
+        for (target, book) in books {
+            if fresh.contains(&book.book_hash) { continue; }
+            let meta = load_book_meta_row(&transaction, &book.book_hash)?;
+            let binding: Option<String> = transaction.query_row("SELECT json FROM device_bindings WHERE hash=?1", [&book.book_hash], |r| r.get(0)).optional()?;
+            if target.generation != self.runtime_generation || meta.as_ref().map(|m| &m.stamp) != Some(&target.metadata_stamp) || binding.as_ref() != Some(&target.binding) {
+                return Err(PortableError::stale_basis("书籍或原书绑定已变化，请重新预览"));
+            }
+        }
+        super::publish_import_rows(&transaction,
+            originals.iter().filter(|(_, h, _, _)| fresh.contains(h)).map(|(r, _, _, _)| r.clone()).collect(),
+            originals.iter().filter(|(_, h, _, _)| published.contains(h)).map(|(_, h, b, _)| (h.clone(), b.clone())).collect(),
+            fresh.iter().cloned().collect(), fresh.iter().cloned().collect())?;
         let device_id = ensure_installation_id(&transaction)?;
         let mut counter = load_counter(&transaction)?;
         let mut outcome = ReadestImportOutcome::default();
@@ -270,8 +311,8 @@ impl PortableStore {
                 )
                 .optional()?;
             if target.generation != self.runtime_generation
-                || current.as_ref().map(|m| &m.stamp) != Some(&target.metadata_stamp)
-                || binding.as_ref() != Some(&target.binding)
+                || (!fresh.contains(&book.book_hash) && current.as_ref().map(|m| &m.stamp) != Some(&target.metadata_stamp))
+                || (!published.contains(&book.book_hash) && binding.as_ref() != Some(&target.binding))
             {
                 return Err(PortableError::stale_basis(
                     "书籍或原书绑定已变化，请重新预览",
@@ -365,8 +406,9 @@ impl PortableStore {
         if cancelled() {
             return Err(import_error("cancelled", "迁入已取消"));
         }
-        finish(transaction)?;
-        outcome.imported_books = changed.len();
+        finish(transaction, &published)?;
+        outcome.imported_books = changed.union(&fresh).count();
+        outcome.books_added = fresh.len();
         // New annotations leave unrelated live editor/reader bases intact.
         // Only replaced progress makes prior read snapshots obsolete.
         self.reads

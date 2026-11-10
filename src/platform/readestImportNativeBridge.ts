@@ -40,13 +40,15 @@ export interface ReadestStageProgress {
   bytesTotal: number;
 }
 
-/** One book made importable: a path on desktop, a content URI on Android. */
+/** A verified off-shelf original; only the native commit can publish it. */
 export interface ReadestStagedBook {
   readestHash: string;
-  path?: string;
-  uri?: string;
   fileName?: string;
   errorCode?: string;
+  bookHash?: string;
+  targetToken?: string;
+  existing?: boolean;
+  progress?: ReadestLocalProgress | null;
 }
 
 export interface ReadestLibraryProbe {
@@ -81,6 +83,8 @@ export interface ReadestBookImportPayload {
 
 export interface ReadestImportOutcome {
   importedBooks: number;
+  booksAdded?: number;
+  booksAlready?: number;
   bookmarksAdded: number;
   notesAdded: number;
   progressWritten: number;
@@ -92,7 +96,7 @@ export type ReadestCloseStatus = "closed" | "committed" | "not-found";
 
 /** Native limits the dialog has to respect before calling. */
 export const READEST_TARGET_BATCH = 128;
-export const READEST_COMMIT_MAX_BOOKS = 128;
+export const READEST_COMMIT_MAX_BOOKS = 10000;
 export const READEST_COMMIT_MAX_RECORDS = 20_000;
 export const READEST_STAGE_BATCH = 128;
 
@@ -148,8 +152,8 @@ export function readestImportTargets(sessionId: string, bookHashes: string[], ru
   return run("readest_import_targets", { sessionId, bookHashes });
 }
 
-export function commitReadestImport(sessionId: string, books: ReadestBookImportPayload[], run: Invoke = call): Promise<ReadestImportOutcome> {
-  return run("readest_import_commit", { sessionId, books });
+export function commitReadestImport(sessionId: string, books: ReadestBookImportPayload[], run: Invoke = call, stagedHashes: string[] = []): Promise<ReadestImportOutcome> {
+  return run("readest_import_commit", { sessionId, books, stagedHashes });
 }
 
 /**

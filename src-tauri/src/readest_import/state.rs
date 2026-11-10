@@ -54,6 +54,7 @@ pub(super) struct BookFile {
 
 pub(super) struct StoredTarget {
     pub token: String,
+    pub partial_md5: String,
     pub target: ReadestTarget,
 }
 #[derive(Default)]
@@ -65,6 +66,7 @@ pub(super) struct SessionData {
     pub cache: BTreeMap<usize, Arc<Vec<u8>>>,
     pub staging: Option<PathBuf>,
     pub staged: u64,
+    pub prepared: BTreeMap<String, Arc<super::intake::Prepared>>,
     pub configs: BTreeMap<String, JsonEntry>,
     pub entries: BTreeMap<usize, (JsonEntry, Option<String>)>,
     pub configs_read: BTreeSet<String>,
@@ -361,4 +363,14 @@ impl ReadestImportState {
             let _ = session.close();
         }
     }
+}
+
+/// A matching token is scoped to both the local bytes and the Readest book identity.
+pub(super) fn matched_target<'a>(data: &'a SessionData, book: &crate::portable_state::ReadestBookImport) -> PortableResult<&'a ReadestTarget> {
+    let stored = data.targets.get(&book.book_hash).filter(|target| target.token == book.target_token)
+        .ok_or_else(|| error("stale-basis", "匹配令牌已失效，请重新预览"))?;
+    if stored.partial_md5 != book.readest_hash {
+        return Err(error("source-mismatch", "原书与 Readest 指纹不符"));
+    }
+    Ok(&stored.target)
 }

@@ -350,7 +350,7 @@ pub async fn readest_import_targets(
                     .map_err(|_| error("storage-error", "无法生成匹配令牌"))?;
                 let row = TargetCandidate {
                     book_hash: hash.clone(),
-                    partial_md5: Some(md5),
+                    partial_md5: Some(md5.clone()),
                     target_token: Some(token.clone()),
                     progress: Some(target.progress.clone()),
                     error_code: None,
@@ -360,7 +360,7 @@ pub async fn readest_import_targets(
                     .lock()
                     .map_err(|_| error("storage-error", "迁入会话锁不可用"))?
                     .targets
-                    .insert(hash.clone(), StoredTarget { token, target });
+                    .insert(hash.clone(), StoredTarget { token, target, partial_md5: md5 });
                 Ok(row)
             });
             match result {
@@ -402,12 +402,23 @@ pub async fn readest_import_commit(
     window: WebviewWindow,
     session_id: String,
     books: Vec<ReadestBookImport>,
+    staged_hashes: Option<Vec<String>>,
 ) -> PortableResult<ReadestImportOutcome> {
     tauri::async_runtime::spawn_blocking(move || {
-        if books.is_empty() || books.len() > 128 {
-            return Err(error("too-large", "每批迁入1至128本书"));
+        if (books.is_empty() && staged_hashes.as_ref().is_none_or(Vec::is_empty)) || books.len() > 10000 {
+            return Err(error("too-large", "迁入批次超出限制"));
         }
         let session = session(&window, &session_id)?;
+        let staged_hashes = staged_hashes.unwrap_or_default();
+        if staged_hashes.len() > 10000 { return Err(error("too-large", "迁入书籍过多")); }
+        let prepared = {
+            let data = session.data.lock().map_err(|_| error("storage-error", "会话锁不可用"))?;
+            let mut unique = BTreeSet::new();
+            staged_hashes.iter().map(|h| {
+                if !unique.insert(h) { return Err(error("invalid-request", "重复的来源书籍")); }
+                data.prepared.get(h).cloned().ok_or_else(|| error("not-ready", "原书尚未校验"))
+            }).collect::<PortableResult<Vec<_>>>()?
+        };
         let plan = {
             let data = session
                 .data
@@ -421,12 +432,12 @@ pub async fn readest_import_commit(
                 {
                     return Err(error("invalid-request", "请先读取所选书籍的备份配置"));
                 }
-                let stored = data
-                    .targets
-                    .get(&book.book_hash)
-                    .filter(|t| t.token == book.target_token)
-                    .ok_or_else(|| error("stale-basis", "匹配令牌已失效，请重新预览"))?;
-                plan.push((stored.target.clone(), book));
+                let target = matched_target(&data, &book)?;
+                if data.prepared.values().any(|p| p.hash == book.book_hash)
+                    && !prepared.iter().any(|p| p.hash == book.book_hash) {
+                    return Err(error("invalid-request", "未选择迁入这本原书"));
+                }
+                plan.push((target.clone(), book));
             }
             plan
         };
@@ -436,14 +447,41 @@ pub async fn readest_import_commit(
         let cancelled = || session.cancelled.load(Ordering::Acquire);
         // Only selected books incur whole-source verification. Matching all
         // shelf candidates above reads at most 12 KiB per source.
-        let guards = plan
+        let mut guards = plan
             .iter()
-            .map(|(target, book)| source::verify(app, &target.binding, &book.book_hash, &cancelled))
-            .collect::<PortableResult<Vec<_>>>()?;
-        scoped(&window, &session.scope, |store, current| {
-            store.import_readest(&plan, now_ms(), &cancelled, |transaction| {
-                session.finish(transaction, current, &guards)
+            .map(|(target, book)| {
+                let binding = prepared.iter().find(|p| p.hash == book.book_hash)
+                    .map(|p| if p.existing && !p.needs_copy { p.target.binding.as_str() } else { p.source_binding.as_str() }).unwrap_or(&target.binding);
+                source::verify(app, binding, &book.book_hash, &cancelled)
             })
+            .collect::<PortableResult<Vec<_>>>()?;
+        for original in &prepared {
+            if !plan.iter().any(|(_, b)| b.book_hash == original.hash) {
+                let binding = if original.existing && !original.needs_copy { &original.target.binding } else { &original.source_binding };
+                guards.push(source::verify(app, binding, &original.hash, &cancelled)?);
+            }
+        }
+        // Hold the same short publication lock as other library writers; network/JS preparation is complete.
+        let lock = app.state::<crate::linked_library::LinkedLibraryWriteState>();
+        let _write = lock.0.lock().map_err(|_| error("storage-error", "书库写入锁不可用"))?;
+        let mut publication = super::intake::Publication::new();
+        let originals = publication.originals(app, &prepared, &|| session.check())?;
+        scoped(&window, &session.scope, |store, current| {
+            let visible = store.local_visible_hashes()?;
+            for original in &prepared {
+                if original.target.generation != store.runtime_generation()
+                    || (original.existing && (!visible.contains(&original.hash)
+                        || store.binding_raw(&original.hash)?.as_ref() != Some(&original.target.binding))) {
+                    return Err(error("stale-basis", "书籍或书架已变化，请重新迁入"));
+                }
+            }
+            let mut outcome = store.import_readest_bundle(&plan, &originals, now_ms(), &cancelled, |transaction, fresh| {
+                session.finish(transaction, current, &guards)?;
+                publication.accept(fresh);
+                Ok(())
+            })?;
+            outcome.books_already = prepared.len().saturating_sub(outcome.books_added);
+            Ok(outcome)
         })
     })
     .await

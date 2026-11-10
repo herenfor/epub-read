@@ -63,9 +63,9 @@ beforeEach(() => {
     sourceKey: `readest:${readestHash}:bookmark`, grade: "exact", reasons: [], source: { cfi: "", text: null }, value: {
       locator: { locatorVersion: 1, chapterPath: "c.xhtml", spineIndexHint: 0, target: { kind: "chapter-start" } }, text: "bookmark", createdAtMs: 1,
     } }] }));
-  ports.stage.mockResolvedValue([{ readestHash: NEW, path: "/cache/1/New.epub", fileName: "New.epub" }]);
+  ports.stage.mockResolvedValue([{ readestHash: NEW, bookHash: newEntry.contentHash, targetToken: "token-new", fileName: "New.epub", existing: false }]);
   ports.importPaths.mockResolvedValue({ results: [{ inputIndex: 0, status: "saved", contentHash: newEntry.contentHash, record: newEntry }] });
-  ports.commit.mockResolvedValue(outcome); ports.refresh.mockResolvedValue(undefined);
+  ports.commit.mockResolvedValue({ ...outcome, bookmarksAdded: 2, booksAdded: 1, booksAlready: 0 }); ports.refresh.mockResolvedValue(undefined);
 });
 
 async function setup(options: { withLocalBook?: boolean; platform?: string } = {}) {
@@ -121,13 +121,13 @@ describe("Readest import flow", () => {
       const listed = t.current().state;
       expect(listed.kind === "list" && listed.rows.map((row) => [row.title, row.kind])).toEqual([["New", "new"], ["Shelved", "existing"]]);
       await t.dom.run(async () => { await t.current().run(); });
-      // The staged file goes through the normal path importer, always as a library copy.
+      // Originals never pass through a separately committing shelf importer.
       expect(ports.stage.mock.calls[0].slice(0, 2)).toEqual([ports.open.mock.calls[0][0].sessionId, [NEW]]);
-      expect(ports.importPaths).toHaveBeenCalledWith(["/cache/1/New.epub"], true);
-      expect(ports.release).toHaveBeenCalledTimes(1);
-      // Records of the shelved book first, then those of the book just added.
-      expect(ports.commit.mock.calls.map(([, books]) => books.map((book: { bookHash: string; readestHash: string }) => [book.bookHash[0], book.readestHash[0]])))
-        .toEqual([[["a", "b"]], [["d", "c"]]]);
+      expect(ports.importPaths).not.toHaveBeenCalled();
+      expect(ports.release).not.toHaveBeenCalled();
+      expect(ports.commit).toHaveBeenCalledTimes(1);
+      expect(ports.commit.mock.calls[0][1]).toHaveLength(2);
+      expect(ports.commit.mock.calls[0][3]).toEqual([NEW]);
       expect(t.current().state).toMatchObject({ kind: "done", result: { booksAdded: 1, bookmarksAdded: 2, failed: [], stopped: false, notReached: 0, error: null } });
       expect(t.importSlotRef.current).toBeNull();
       expect(ports.refresh).toHaveBeenCalledTimes(1);
@@ -148,19 +148,21 @@ describe("Readest import flow", () => {
       expect(ports.close).toHaveBeenCalledTimes(1);
       await t.dom.run(async () => { staging.reject({ code: "cancelled" }); await pending; });
       expect(ports.importPaths).not.toHaveBeenCalled();
-      // The shelved book's records were already committed; that is reported, not undone.
-      expect(t.current().state).toMatchObject({ kind: "done", result: { stopped: true, notReached: 1, booksAdded: 0, bookmarksAdded: 1, error: null } });
+      // Existing records also remain uncommitted until every original is ready.
+      expect(ports.commit).not.toHaveBeenCalled();
+      expect(t.current().state).toMatchObject({ kind: "done", result: { stopped: true, notReached: 2, booksAdded: 0, bookmarksAdded: 0, error: null } });
     } finally { await t.dom.dispose(); }
   });
 
-  it("keeps going when one book cannot be added and names it in the result", async () => {
+  it("does not commit other records when an original fails verification or staging", async () => {
     const t = await setup({ withLocalBook: true });
     ports.stage.mockResolvedValueOnce([{ readestHash: NEW, errorCode: "storage-error" }]);
     try {
       await t.dom.run(async () => { await t.start("backup.zip"); });
       await t.dom.run(async () => { await t.current().run(); });
       expect(ports.importPaths).not.toHaveBeenCalled();
-      expect(t.current().state).toMatchObject({ kind: "done", result: { booksAdded: 0, failed: [{ title: "New", reason: "readestImport.fail.storage" }], error: null } });
+      expect(ports.commit).not.toHaveBeenCalled();
+      expect(t.current().state).toMatchObject({ kind: "done", result: { booksAdded: 0, failed: [{ title: "New", reason: "readestImport.fail.storage" }], bookmarksAdded: 0, notReached: 2 } });
     } finally { await t.dom.dispose(); }
   });
 
@@ -223,4 +225,52 @@ describe("Readest import session ownership", () => {
       expect(t.importSlotRef.current).toBeNull();
     } finally { await t.dom.dispose(); }
   });
+});
+
+it("keeps prepared books off the shelf if record conversion or the final transaction fails", async () => {
+  const t = await setup({ withLocalBook: true });
+  try {
+    await t.dom.run(async () => { await t.start("backup.zip"); });
+    ports.convert.mockRejectedValueOnce(new Error("bad records"));
+    await t.dom.run(async () => { await t.current().run(); });
+    expect(ports.commit).not.toHaveBeenCalled();
+    expect(ports.importPaths).not.toHaveBeenCalled();
+    expect(t.current().state).toMatchObject({ kind: "done", result: { booksAdded: 0, bookmarksAdded: 0, notReached: 2 } });
+    await t.dom.run(async () => { t.current().cancel(); await t.start("retry.zip"); });
+    ports.commit.mockRejectedValueOnce({ code: "storage-error" });
+    await t.dom.run(async () => { await t.current().run(); });
+    expect(ports.commit).toHaveBeenCalledTimes(1);
+    expect(ports.commit.mock.calls[0][1]).toHaveLength(2);
+    expect(t.current().state).toMatchObject({ kind: "done", result: { booksAdded: 0, bookmarksAdded: 0, notReached: 2 } });
+    expect(ports.refresh).not.toHaveBeenCalled();
+  } finally { await t.dom.dispose(); }
+});
+
+it("reports a staged fingerprint mismatch without publishing already converted records", async () => {
+  const t = await setup({ withLocalBook: true });
+  ports.stage.mockResolvedValueOnce([{ readestHash: NEW, errorCode: "source-mismatch" }]);
+  try {
+    await t.dom.run(async () => { await t.start("wrong-file.zip"); });
+    await t.dom.run(async () => { await t.current().run(); });
+    expect(ports.commit).not.toHaveBeenCalled();
+    expect(ports.importPaths).not.toHaveBeenCalled();
+    expect(t.current().state).toMatchObject({ kind: "done", result: { booksAdded: 0, bookmarksAdded: 0, failed: [{ title: "New", reason: "readestImport.fail.mismatch" }] } });
+  } finally { await t.dom.dispose(); }
+});
+
+it("commits a staged book without records, reporting native duplicate counts rather than inventing additions", async () => {
+  ports.library = [readestBook(NEW, "Text")];
+  ports.open.mockImplementation(async ({ sessionId }) => ({ sessionId, library: { entryIndex: 0, bytes: 2 }, kind: "zip", books: [{ readestHash: NEW, fileName: "Text.txt", bytes: 2048 }] }));
+  ports.stage.mockResolvedValue([{ readestHash: NEW, bookHash: newEntry.contentHash, fileName: "Text.txt", targetToken: "t", existing: true }]);
+  ports.commit.mockResolvedValue({ ...outcome, bookmarksAdded: 0, booksAdded: 0, booksAlready: 1 });
+  const t = await setup();
+  try {
+    await t.dom.run(async () => { await t.start("text.zip"); });
+    await t.dom.run(async () => { await t.current().run(); });
+    expect(ports.convert).not.toHaveBeenCalled();
+    expect(ports.importPaths).not.toHaveBeenCalled();
+    expect(ports.commit.mock.calls[0][1]).toEqual([]);
+    expect(ports.commit.mock.calls[0][3]).toEqual([NEW]);
+    expect(t.current().state).toMatchObject({ kind: "done", result: { booksAdded: 0, booksAlready: 1 } });
+  } finally { await t.dom.dispose(); }
 });

@@ -62,8 +62,8 @@
   "readestImport.fail.storage": "Not enough storage, or it can't be written",
   "readestImport.fail.unreadable": "The book file can't be read",
   "readestImport.fail.notAdded": "It couldn't be added to your shelf",
-  "readestImport.fail.records": "The book is on your shelf, but its reading data can't be read",
-  "readestImport.fail.tooMany": "The book is on your shelf, but it has too much reading data to import",
+  "readestImport.fail.records": "Reading records could not be read. This import has not been committed.",
+  "readestImport.fail.tooMany": "The records exceed the batch limit. This import has not been committed.",
   "readestImport.error.notReadest": "There is no Readest library here. Choose a backup exported by Readest, or its data folder",
   "readestImport.error.invalid": "This Readest data can't be read or is damaged",
   "readestImport.error.tooLarge": "This Readest data is too large to read",
@@ -73,5 +73,6 @@
   "readestImport.error.closed": "The import ended (the shelf was switched, locked or it was cancelled)",
   "readestImport.error.busy": "Another import or shelf task is running. Try again shortly",
   "readestImport.error.randomAccess": "The backup can't be read from this location. Save it to this device first, then import from there",
-  "readestImport.error.other": "Readest import failed: {error}"
+  "readestImport.error.other": "Readest import failed: {error}",
+  "readestImport.fail.mismatch": "The book does not match its Readest fingerprint. It was not added to the shelf."
 }

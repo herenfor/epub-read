@@ -146,7 +146,7 @@ pub(crate) fn archive_open_blocking(
     register_archive(&app, owner, session, verify_ms, directory_ms, managed_comic && entry_count >= 2048)
 }
 
-fn register_archive(
+pub(crate) fn register_archive(
     app: &AppHandle, owner: String, session: NativeZipSession,
     verify_ms: u64, directory_ms: u64, compact_directory: bool,
 ) -> Result<ArchiveOpenView, LinkedLibraryError> {

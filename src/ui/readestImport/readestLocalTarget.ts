@@ -3,6 +3,8 @@
  * chapter XHTML, read through the shelf store's existing archive channel.
  * Nothing here goes through the reader session; the caller closes the target.
  */
+import { invoke } from "@tauri-apps/api/core";
+import { createNativeArchiveClient } from "../../platform/nativeArchiveClient";
 import { disposeBook, spineItemPath } from "../../core/book";
 import { loadSourceArchive } from "../../core/documentFormats";
 import { hasParserError, parseXmlText } from "../../core/parseXml";
@@ -48,9 +50,13 @@ function targetFor(book: Book, opfDocument: Document | null): ReadestImportTarge
 export async function openReadestTarget(
   store: Pick<ShelfStore, "openArchive">,
   entry: { id: string; fileName: string },
+  staged?: { sessionId: string; readestHash: string },
 ): Promise<OpenedReadestTarget> {
-  if (!store.openArchive) throw Object.assign(new Error("archive unavailable"), { code: "source-unavailable" });
-  const archive = await store.openArchive(entry.id);
+  if (!store.openArchive && !staged) throw Object.assign(new Error("archive unavailable"), { code: "source-unavailable" });
+  const archive = staged
+    ? await createNativeArchiveClient(entry.id, (command, args) => command === "linked_library_archive_open"
+      ? invoke("readest_staged_archive_open", staged) : invoke(command, args))
+    : await store.openArchive!(entry.id);
   let book: Book;
   try {
     book = await loadSourceArchive(archive, entry.fileName, { parseToc: false, preloadCover: false });

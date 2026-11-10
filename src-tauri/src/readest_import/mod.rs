@@ -1,7 +1,9 @@
 //! Read-only Readest sessions (backup ZIP or Readest's library folder) and
-//! confirmed local record migration. Book files are only handed to the normal
-//! import pipeline; no settings, external clocks or foreign tombstones are imported.
+//! confirmed local migration. Originals are staged off-shelf and published with
+//! records in one transaction; no settings, external clocks or foreign tombstones are imported.
 mod books;
+mod intake;
+pub(crate) use intake::*;
 mod commands;
 mod folder;
 pub(crate) mod source;

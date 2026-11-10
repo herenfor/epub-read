@@ -400,3 +400,8 @@ mod tests {
         assert_eq!(fs::read(normal_file).unwrap(), b"normal metadata");
     }
 }
+
+/// Nonblocking epoch guard for scoped import archive reads.
+pub(crate) fn import_epoch(app: &tauri::AppHandle) -> u64 {
+    app.state::<PrivateShelfState>().lock_epoch.load(Ordering::Acquire)
+}

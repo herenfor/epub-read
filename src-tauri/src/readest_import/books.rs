@@ -1,4 +1,4 @@
-//! Hands the book files of a Readest source to the normal import pipeline.
+//! Prepares the book files of a Readest source without changing the shelf.
 //! A ZIP entry is extracted to a private staging file first; a library-folder
 //! book is imported from where it is. Nothing is added to the shelf here.
 use super::{commands::session, state::*, *};
@@ -35,16 +35,16 @@ pub(crate) struct StageProgress {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct StagedBook {
     readest_hash: String,
-    /// Desktop: a file the path importer can copy into the library.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    path: Option<String>,
-    /// Android: the same staged file as a content URI of this app.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    uri: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     file_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    book_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_token: Option<String>,
+    existing: bool,
+    progress: Option<crate::portable_state::ProgressProjection>,
 }
 
 /// A plain file name that is valid on every platform we write to.
@@ -135,20 +135,6 @@ pub(super) fn sweep(app: &tauri::AppHandle) {
     }
 }
 
-fn hand_over(app: &tauri::AppHandle, path: &Path) -> PortableResult<(Option<String>, Option<String>)> {
-    #[cfg(target_os = "android")]
-    {
-        let uri = crate::android_uri_bridge::cache_file_uri(app, &path.to_string_lossy())
-            .map_err(|_| error("storage-error", "无法交出迁入临时文件"))?;
-        Ok((None, Some(uri)))
-    }
-    #[cfg(not(target_os = "android"))]
-    {
-        let _ = app;
-        Ok((Some(path.to_string_lossy().into_owned()), None))
-    }
-}
-
 /// Makes the chosen books importable. Per-book failures are reported in the
 /// row; cancellation and a locked shelf fail the whole call.
 #[tauri::command]
@@ -211,7 +197,9 @@ pub async fn readest_books_stage(
                     let ready = match (&book.at, &archive) {
                         (BookAt::File(path), _) => {
                             if path.is_file() {
-                                Ok(path.clone())
+                                let dest = staging.join(serial.to_string()).join(&name);
+                                fs::create_dir_all(dest.parent().unwrap()).map_err(|_| error("storage-error", "无法创建临时目录"))?;
+                                super::intake::copy_checked(path, &dest, &|| session.check()).map(|()| dest)
                             } else {
                                 Err(error("source-unavailable", "Readest 书库里的书文件已不在"))
                             }
@@ -229,25 +217,26 @@ pub async fn readest_books_stage(
                         _ => Err(error("invalid-request", "来源与书文件位置不一致")),
                     };
                     bytes_done += book.bytes;
-                    ready.and_then(|path| hand_over(app, &path).map(|(path, uri)| (path, uri, name)))
+                    ready.and_then(|path| super::intake::prepare(&window, &session, &hash, path, name))
                 }
             };
             report(bytes_done, completed + 1);
             rows.push(match staged {
-                Ok((path, uri, name)) => StagedBook {
+                Ok(book) => StagedBook {
                     readest_hash: hash,
-                    path,
-                    uri,
-                    file_name: Some(name),
+                    file_name: Some(book.name.clone()),
+                    book_hash: Some(book.hash.clone()),
+                    target_token: Some(book.token.clone()),
+                    existing: book.existing,
+                    progress: Some(book.target.progress.clone()),
                     error_code: None,
                 },
                 Err(e) if matches!(e.code.as_str(), "cancelled" | "locked" | "session-closed") => return Err(e),
                 Err(e) => StagedBook {
                     readest_hash: hash,
-                    path: None,
-                    uri: None,
                     file_name: None,
                     error_code: Some(e.code),
+                    book_hash: None, target_token: None, existing: false, progress: None,
                 },
             });
         }
