@@ -1,6 +1,15 @@
-/* Readest import: rows and grading on top of the shared save-file dialog. */
-.save-file-dialog.readest-import.wide {
+/* Readest import (and the KOReader dialog's rows) on top of the shared save-file dialog. */
+.save-file-dialog.readest-flow {
+  display: flex;
+  flex-direction: column;
   width: min(600px, 100%);
+  overflow: hidden;
+}
+
+.save-file-dialog.readest-flow > .save-file-dialog-body {
+  min-height: 0;
+  overflow-y: auto;
+  align-content: start;
 }
 
 .readest-group {
@@ -24,6 +33,19 @@
   background: var(--shelf-input-bg);
 }
 
+label.readest-row:not(.disabled) {
+  cursor: pointer;
+}
+
+.readest-row.readest-static {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.readest-row.readest-static .readest-row-text span {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .readest-row.disabled {
   opacity: 0.55;
 }
@@ -43,10 +65,14 @@
 
 .readest-row-text span,
 .readest-progress small,
-.readest-item small {
+.readest-all small,
+.readest-choice span {
   display: block;
+  overflow: hidden;
   color: var(--muted);
   font-size: var(--fs-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .readest-choose {
@@ -68,71 +94,147 @@
   background: var(--shelf-input-bg);
 }
 
-.readest-book-top {
-  display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: center;
-}
-
-.readest-link {
-  padding: 2px 6px;
-  border: 0;
-  background: none;
-  color: var(--muted);
-  font: inherit;
-  font-size: var(--fs-caption);
-  cursor: pointer;
-}
-
-.readest-counts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  font-size: var(--fs-caption);
-}
-
 .readest-ok { color: color-mix(in srgb, #1f9d55 72%, var(--fg)); }
-.readest-warn { color: color-mix(in srgb, #b8860b 78%, var(--fg)); }
-.readest-bad { color: var(--error); }
+.readest-warn { margin: 0; color: color-mix(in srgb, #b8860b 78%, var(--fg)); }
+.readest-bad { margin: 0; color: var(--error); }
 .readest-muted { color: var(--muted); }
 
-.readest-progress {
+/* Source screen */
+.readest-found {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
-  gap: 8px;
-  padding: 8px 10px;
-  border: 1px dashed var(--panel-border);
-  border-radius: var(--r-sm);
-  font-size: var(--fs-caption);
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--panel-border));
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg));
+}
+
+.readest-path {
+  direction: rtl;
+  text-align: left;
+}
+
+.readest-primary {
+  min-height: 38px;
+  padding: 6px 16px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-md);
+  background: var(--accent);
+  color: var(--accent-foreground);
+  font: inherit;
   cursor: pointer;
 }
 
-.readest-detail {
+.readest-choice {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 11px 14px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--r-md);
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.readest-choice:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--panel-border));
+}
+
+.readest-choice b {
+  font-weight: 600;
+}
+
+/* List screen */
+.readest-all {
+  display: grid;
+  grid-template-columns: 20px auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 0 10px;
+  cursor: pointer;
+}
+
+.readest-all small {
+  text-align: right;
+}
+
+.readest-rule {
   display: grid;
   gap: 6px;
-  padding-left: 30px;
 }
 
-.readest-item {
+/* Progress and result */
+.readest-progress {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
   gap: 8px;
-  align-items: start;
-  font-size: var(--fs-caption);
+}
+
+.readest-bar {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--shelf-input-bg);
+}
+
+.readest-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transform-origin: left center;
+  transition: transform 0.2s ease;
+}
+
+.readest-now {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.readest-summary {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
   line-height: 1.5;
+}
+
+.readest-fold {
+  justify-self: start;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-align: left;
   cursor: pointer;
 }
 
-.readest-item.off {
-  cursor: default;
+.readest-fold::after {
+  content: " ▾";
 }
 
-.readest-item.off q {
-  color: var(--muted);
+.readest-fold[aria-expanded="true"]::after {
+  content: " ▴";
 }
 
-.readest-progress input,
-.readest-item input {
-  margin-top: 2px;
+@media (max-width: 560px) {
+  .save-file-dialog.readest-flow {
+    max-height: calc(100vh - 32px);
+  }
+  .readest-found {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .readest-bar i {
+    transition: none;
+  }
 }

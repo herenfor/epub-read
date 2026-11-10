@@ -1,39 +1,34 @@
 import { useState } from "react";
+import { Segmented } from "../controls/Segmented";
 import { useUiText } from "../localization/UiLanguageProvider";
 import "../saveFileDialogs.css";
 import "./readestImport.css";
-import type { ImportCandidate } from "./readestConvert";
-import {
-  canImportRow,
-  commitPlan,
-  gradeCounts,
-  isSelectable,
-  type BookReview,
-  type LocalImportBook,
-  type MatchRow,
-  type ReviewItem,
-} from "./readestImportModel";
+import { selectionSummary, type ImportResult, type ImportRow, type PositionRule, type RowKind } from "./readestImportModel";
 import type { ReadestImportState } from "./useReadestImport";
 
 export interface ReadestImportDialogProps {
   state: ReadestImportState;
-  updateRows(update: (rows: MatchRow[]) => MatchRow[]): void;
-  updateReviews(update: (reviews: BookReview[]) => BookReview[]): void;
-  onNext(): void;
+  updateRows(update: (rows: ImportRow[]) => ImportRow[]): void;
+  onRule(rule: PositionRule): void;
+  onUseFound(): void;
+  onPickBackup(): void;
+  onPickFolder(): void;
   onBack(): void;
-  onCommit(): void;
+  onRun(): void;
+  onStop(): void;
   onCancel(): void;
 }
 
 type T = ReturnType<typeof useUiText>["t"];
+type Of<K extends ReadestImportState["kind"]> = Extract<ReadestImportState, { kind: K }>;
 
-function Shell(props: { title: string; subtitle?: string; children: React.ReactNode; actions: React.ReactNode; wide?: boolean }) {
+function Shell(props: { subtitle?: string; children: React.ReactNode; actions: React.ReactNode }) {
   const { t } = useUiText();
   return (
     <div className="save-file-backdrop" role="presentation">
-      <section className={`save-file-dialog readest-import${props.wide ? " wide" : ""}`} role="dialog" aria-modal="true" aria-label={t("readestImport.dialog")}>
+      <section className="save-file-dialog readest-import readest-flow" role="dialog" aria-modal="true" aria-label={t("readestImport.title")}>
         <header className="save-file-dialog-head">
-          <h2>{props.title}</h2>
+          <h2>{t("readestImport.title")}</h2>
           {props.subtitle && <p>{props.subtitle}</p>}
         </header>
         <div className="save-file-dialog-body">{props.children}</div>
@@ -43,212 +38,221 @@ function Shell(props: { title: string; subtitle?: string; children: React.ReactN
   );
 }
 
-function MatchStep(props: ReadestImportDialogProps & { state: Extract<ReadestImportState, { kind: "match" }> }) {
+function megabytes(bytes: number): string {
+  const mb = bytes / (1024 * 1024);
+  return mb >= 100 ? mb.toFixed(0) : mb >= 1 ? mb.toFixed(1) : Math.max(0.1, mb).toFixed(1);
+}
+
+function SourceStep({ state, ...props }: ReadestImportDialogProps & { state: Of<"source"> }) {
   const { t } = useUiText();
-  const { rows, locals, sourceLabel } = props.state;
-  const byId = new Map(locals.map((book) => [book.id, book]));
-  const setRow = (hash: string, patch: Partial<MatchRow>) =>
-    props.updateRows((all) => all.map((row) => (row.readestHash === hash ? { ...row, ...patch } : row)));
-  const groups: Array<[string, MatchRow[]]> = [
-    [t("readestImport.group.matched"), rows.filter((row) => row.status === "matched")],
-    [t("readestImport.group.choose"), rows.filter((row) => row.status === "ambiguous" || row.status === "unmatched")],
-    [t("readestImport.group.unavailable"), rows.filter((row) => !canImportRow(row))],
-  ];
-  const ready = rows.some((row) => row.selected && row.chosen);
+  const found = state.probe && state.probe !== "probing" ? state.probe : null;
   return (
-    <Shell
-      title={t("readestImport.match.title")}
-      subtitle={t("readestImport.match.subtitle", { source: sourceLabel })}
-      actions={<>
-        <button type="button" onClick={props.onCancel}>{t("readestImport.cancel")}</button>
-        <button type="button" className="primary" disabled={!ready} onClick={props.onNext}>{t("readestImport.next")}</button>
-      </>}
-    >
-      {locals.length === 0 && <p className="save-file-muted">{t("readestImport.match.noLocal")}</p>}
-      {groups.map(([label, group]) => group.length > 0 && (
-        <div className="readest-group" key={label}>
-          <p className="readest-group-label">{label}</p>
-          {group.map((row) => {
-            const importable = canImportRow(row);
-            return (
-              <div className={`readest-row${importable ? "" : " disabled"}`} key={row.readestHash}>
-                <input
-                  type="checkbox"
-                  aria-label={row.title}
-                  disabled={!importable || !row.chosen}
-                  checked={row.selected && Boolean(row.chosen)}
-                  onChange={(event) => setRow(row.readestHash, { selected: event.target.checked })}
-                />
-                <span className="readest-row-text">
-                  <b>{row.title}</b>
-                  <span>{rowDetail(t, row, byId)}</span>
-                </span>
-                {importable && row.status !== "matched" && (
-                  <select
-                    className="readest-choose"
-                    aria-label={t("readestImport.choose.label")}
-                    value={row.chosen ?? ""}
-                    onChange={(event) => setRow(row.readestHash, { chosen: event.target.value || null, selected: Boolean(event.target.value) })}
-                  >
-                    <option value="">{t("readestImport.choose.placeholder")}</option>
-                    {localOptions(row, locals).map((book) => <option key={book.id} value={book.id}>{book.title}</option>)}
-                  </select>
-                )}
-              </div>
-            );
-          })}
+    <Shell actions={<button type="button" onClick={props.onCancel}>{t("readestImport.cancel")}</button>}>
+      {state.probe === "probing" && <p className="save-file-muted">{t("readestImport.source.probing")}</p>}
+      {found && (
+        <div className="readest-found">
+          <div className="readest-row-text">
+            <b>{t("readestImport.source.found")}</b>
+            <span>{t("readestImport.source.foundBooks", { count: found.books })}</span>
+            <span className="readest-path" title={found.path}>{found.path}</span>
+          </div>
+          <button type="button" className="readest-primary" onClick={props.onUseFound}>{t("readestImport.source.useFound")}</button>
         </div>
-      ))}
-      <p className="save-file-muted">{t("readestImport.match.hint")}</p>
-      <p className="save-file-muted">{t("readestImport.match.scope")}</p>
+      )}
+      {state.canPickFolder && state.probe === null && <p className="save-file-muted">{t("readestImport.source.notFound")}</p>}
+      <div className="readest-group">
+        <button type="button" className="readest-choice" onClick={props.onPickBackup}>
+          <b>{t("readestImport.source.pickBackup")}</b>
+          <span>{t("readestImport.source.pickBackup.detail")}</span>
+        </button>
+        {state.canPickFolder && (
+          <button type="button" className="readest-choice" onClick={props.onPickFolder}>
+            <b>{t("readestImport.source.pickFolder")}</b>
+            <span>{t("readestImport.source.pickFolder.detail")}</span>
+          </button>
+        )}
+      </div>
+      {state.error && <p className="readest-bad" role="alert">{state.error}</p>}
     </Shell>
   );
 }
 
-function rowDetail(t: T, row: MatchRow, byId: Map<string, LocalImportBook>): string {
-  switch (row.status) {
-    case "matched": return t("readestImport.row.matched", { title: byId.get(row.chosen!)?.title ?? "" });
-    case "ambiguous": return row.chosen ? t("readestImport.row.matched", { title: byId.get(row.chosen)?.title ?? "" }) : t("readestImport.row.ambiguous", { count: row.candidates.length });
-    case "unmatched": return row.chosen ? t("readestImport.row.matched", { title: byId.get(row.chosen)?.title ?? "" }) : t("readestImport.row.unmatched");
-    case "deleted": return t("readestImport.row.deleted");
-    case "unsupported-format": return t("readestImport.row.format", { format: row.format });
-  }
+function rowDetail(t: T, row: ImportRow): string {
+  const parts = [row.author, row.format].filter(Boolean);
+  if (row.kind === "new" && row.file) parts.push(`${megabytes(row.file.bytes)} MB`);
+  if (row.kind === "new" && !row.records) parts.push(t("readestImport.row.bookOnly"));
+  if (row.kind === "unavailable") parts.push(t(`readestImport.reason.${row.reason ?? "no-file"}`));
+  return parts.join(" · ");
 }
 
-/** Digest candidates first, then every other local EPUB. */
-function localOptions(row: MatchRow, locals: readonly LocalImportBook[]): LocalImportBook[] {
-  const first = locals.filter((book) => row.candidates.includes(book.id));
-  return [...first, ...locals.filter((book) => !row.candidates.includes(book.id))];
-}
-
-function reasonText(t: T, candidate: ImportCandidate<unknown>): string {
-  // Every ImportReason has a readestImport.reason.* message without parameters.
-  const plain = t as (key: string) => string;
-  return candidate.reasons.map((reason) => plain(`readestImport.reason.${reason}`)).join(t("readestImport.reasonSeparator"));
-}
-
-function quote(item: ReviewItem<unknown>, t: T): string {
-  const value = item.candidate.value as { selectedText?: string; text?: string } | null;
-  return item.candidate.source.text ?? value?.selectedText ?? value?.text ?? t("readestImport.review.bookmark");
-}
-
-function ReviewBook(props: { review: BookReview; index: number; update: ReadestImportDialogProps["updateReviews"] }) {
+function ListStep({ state, ...props }: ReadestImportDialogProps & { state: Of<"list"> }) {
   const { t } = useUiText();
-  const { review, index } = props;
-  const [expanded, setExpanded] = useState(false);
-  const counts = gradeCounts(review);
-  const patch = (change: (review: BookReview) => BookReview) =>
-    props.update((all) => all.map((entry, at) => (at === index ? change(entry) : entry)));
-  const toggleItem = (kind: "bookmarks" | "notes", at: number, selected: boolean) =>
-    patch((entry) => ({ ...entry, [kind]: entry[kind].map((item, i) => (i === at ? { ...item, selected } : item)) }));
-  const details = (["bookmarks", "notes"] as const).flatMap((kind) =>
-    (review[kind] as ReviewItem<unknown>[]).map((item, at) => ({ kind, at, item })).filter(({ item }) => item.candidate.grade !== "exact"));
-  const progress = review.progress;
-  const empty = !progress && review.bookmarks.length === 0 && review.notes.length === 0;
-  const readestPct = progress?.candidate.value?.progressPctHint;
+  const { rows, rule } = state;
+  const importable = rows.filter((row) => row.kind !== "unavailable");
+  const summary = selectionSummary(rows);
+  const chosen = summary.newBooks + summary.existing;
+  const allOn = importable.length > 0 && chosen === importable.length;
+  const toggle = (hash: string, selected: boolean) =>
+    props.updateRows((all) => all.map((row) => (row.readestHash === hash ? { ...row, selected } : row)));
+  const toggleAll = (selected: boolean) =>
+    props.updateRows((all) => all.map((row) => (row.kind === "unavailable" ? row : { ...row, selected })));
+  const groups: Array<[RowKind, ImportRow[]]> = [
+    ["new", rows.filter((row) => row.kind === "new")],
+    ["existing", rows.filter((row) => row.kind === "existing")],
+    ["unavailable", rows.filter((row) => row.kind === "unavailable")],
+  ];
   return (
-    <div className="readest-book">
-      <div className="readest-book-top">
-        <input type="checkbox" aria-label={review.title} checked={review.selected} disabled={empty}
-          onChange={(event) => patch((entry) => ({ ...entry, selected: event.target.checked }))} />
-        <b>{review.title}</b>
-        {details.length > 0 && (
-          <button type="button" className="readest-link" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
-            {expanded ? t("readestImport.review.collapse") : t("readestImport.review.expand")}
-          </button>
-        )}
-      </div>
-      {empty ? <p className="save-file-muted">{t("readestImport.review.empty")}</p> : (
-        <div className="readest-counts">
-          {review.bookmarks.length > 0 && <span>{t("readestImport.review.bookmarks", { count: review.bookmarks.length })}</span>}
-          {review.notes.length > 0 && <span>{t("readestImport.review.notes", { count: review.notes.length })}</span>}
-          {counts.exact > 0 && <span className="readest-ok">{t("readestImport.grade.exact", { count: counts.exact })}</span>}
-          {counts.approximate > 0 && <span className="readest-warn">{t("readestImport.grade.approximate", { count: counts.approximate })}</span>}
-          {counts.unresolved > 0 && <span className="readest-bad">{t("readestImport.grade.unresolved", { count: counts.unresolved })}</span>}
-          {counts.unsupported > 0 && <span className="readest-muted">{t("readestImport.grade.unsupported", { count: counts.unsupported })}</span>}
-        </div>
+    <Shell
+      subtitle={t("readestImport.list.source", { source: state.sourceLabel })}
+      actions={<>
+        <button type="button" onClick={props.onBack}>{t("readestImport.back")}</button>
+        <button type="button" className="primary" disabled={chosen === 0} onClick={props.onRun}>
+          {t("readestImport.run", { count: chosen })}
+        </button>
+      </>}
+    >
+      {rows.length === 0 && <p className="save-file-muted">{t("readestImport.list.empty")}</p>}
+      {importable.length > 0 && (
+        <label className="readest-all">
+          <input type="checkbox" checked={allOn} onChange={(event) => toggleAll(event.target.checked)} />
+          <span>{t("readestImport.list.all")}</span>
+          <small>{summary.newBooks > 0
+            ? t("readestImport.list.chosenWithSize", { count: chosen, size: megabytes(summary.bytes) })
+            : t("readestImport.list.chosen", { count: chosen })}</small>
+        </label>
       )}
-      {progress && (
-        isSelectable(progress.candidate) ? (
-          <label className="readest-progress">
-            <input type="checkbox" checked={progress.selected} disabled={!review.selected}
-              onChange={(event) => patch((entry) => ({ ...entry, progress: entry.progress && { ...entry.progress, selected: event.target.checked } }))} />
-            <span>
-              {review.local.progressPct === null ? t("readestImport.progress.add") : t("readestImport.progress.replace")}
-              <small>
-                {review.local.progressPct === null
-                  ? t("readestImport.progress.readestOnly", { readest: readestPct ?? 0 })
-                  : t("readestImport.progress.both", { readest: readestPct ?? 0, local: Math.round(review.local.progressPct) })}
-                {progress.candidate.grade === "approximate" ? ` · ${reasonText(t, progress.candidate)}` : ""}
-              </small>
-            </span>
-          </label>
-        ) : <p className="save-file-muted readest-bad">{t("readestImport.progress.unresolved")}</p>
-      )}
-      {expanded && (
-        <div className="readest-detail">
-          {details.map(({ kind, at, item }) => {
-            const selectable = isSelectable(item.candidate);
+      {groups.map(([kind, group]) => group.length > 0 && (
+        <div className="readest-group" key={kind}>
+          <p className="readest-group-label">{t(`readestImport.group.${kind}`, { count: group.length })}</p>
+          {group.map((row) => {
+            const off = row.kind === "unavailable";
             return (
-              <label className={`readest-item${selectable ? "" : " off"}`} key={item.candidate.sourceKey}>
-                {selectable
-                  ? <input type="checkbox" checked={item.selected} disabled={!review.selected} onChange={(event) => toggleItem(kind, at, event.target.checked)} />
-                  : <span aria-hidden="true" />}
-                <span>
-                  <q>{quote(item, t)}</q>
-                  <small>{reasonText(t, item.candidate)}</small>
+              <label className={`readest-row${off ? " disabled" : ""}`} key={row.readestHash}>
+                <input type="checkbox" checked={row.selected} disabled={off} aria-label={row.title}
+                  onChange={(event) => toggle(row.readestHash, event.target.checked)} />
+                <span className="readest-row-text">
+                  <b>{row.title}</b>
+                  <span>{rowDetail(t, row)}</span>
                 </span>
               </label>
             );
           })}
         </div>
+      ))}
+      {summary.existing > 0 && (
+        <div className="readest-rule">
+          <p className="readest-group-label">{t("readestImport.rule.label")}</p>
+          <Segmented label={t("readestImport.rule.label")} variant="fill" value={rule} onChange={props.onRule} options={[
+            { value: "farther", label: t("readestImport.rule.farther") },
+            { value: "readest", label: t("readestImport.rule.readest") },
+            { value: "local", label: t("readestImport.rule.local") },
+          ]} />
+        </div>
       )}
-    </div>
-  );
-}
-
-function ReviewStep(props: ReadestImportDialogProps & { state: Extract<ReadestImportState, { kind: "review" }> }) {
-  const { t } = useUiText();
-  const { reviews } = props.state;
-  const plan = commitPlan(reviews);
-  const count = plan.ok ? plan.records : 0;
-  return (
-    <Shell
-      wide
-      title={t("readestImport.review.title")}
-      subtitle={t("readestImport.review.subtitle")}
-      actions={<>
-        <button type="button" onClick={props.onBack}>{t("readestImport.back")}</button>
-        <button type="button" className="primary" disabled={count === 0} onClick={props.onCommit}>{t("readestImport.confirm", { count })}</button>
-      </>}
-    >
-      {reviews.map((review, index) => <ReviewBook key={review.readestHash} review={review} index={index} update={props.updateReviews} />)}
-      <p className="save-file-muted">{t("readestImport.review.footer")}</p>
     </Shell>
   );
 }
 
-function WorkingStep(props: ReadestImportDialogProps & { state: Extract<ReadestImportState, { kind: "working" }> }) {
+function WorkingStep({ state, onCancel }: { state: Of<"working">; onCancel(): void }) {
   const { t } = useUiText();
-  const { step, done, total, sourceLabel } = props.state;
-  const text = step === "converting"
-    ? t("readestImport.working.converting", { done, total })
-    : t(`readestImport.working.${step}`);
+  const text = state.step === "opening"
+    ? t("readestImport.working.opening")
+    : state.total > 0
+      ? t("readestImport.working.matchingCount", { done: state.done, total: state.total })
+      : t("readestImport.working.matching");
   return (
-    <Shell
-      title={t("readestImport.match.title")}
-      subtitle={sourceLabel}
-      actions={<button type="button" disabled={step === "committing"} onClick={props.onCancel}>{t("readestImport.cancel")}</button>}
-    >
-      <p className="save-file-muted" role="status" aria-live="polite">{text}</p>
+    <Shell subtitle={t("readestImport.list.source", { source: state.sourceLabel })}
+      actions={<button type="button" onClick={onCancel}>{t("readestImport.cancel")}</button>}>
+      <p className="save-file-muted" role="status">{text}</p>
+    </Shell>
+  );
+}
+
+function ImportingStep({ state, onStop }: { state: Of<"importing">; onStop(): void }) {
+  const { t } = useUiText();
+  const extracting = state.bytesTotal > 0 && state.bytesDone < state.bytesTotal;
+  const ratio = state.total > 0 ? Math.min(1, state.done / state.total) : 0;
+  return (
+    <Shell subtitle={t("readestImport.list.source", { source: state.sourceLabel })}
+      actions={<button type="button" disabled={state.stopping} onClick={onStop}>
+        {state.stopping ? t("readestImport.stopping") : t("readestImport.stop")}
+      </button>}>
+      <div className="readest-progress" role="status">
+        <b>{t("readestImport.importing", { done: state.done, total: state.total })}</b>
+        <div className="readest-bar"><i style={{ transform: `scaleX(${ratio})` }} /></div>
+        <span className="readest-now">{state.title}</span>
+        {extracting && <small>{t("readestImport.importing.extracting", { done: megabytes(state.bytesDone), total: megabytes(state.bytesTotal) })}</small>}
+      </div>
+    </Shell>
+  );
+}
+
+function ResultLines({ result }: { result: ImportResult }) {
+  const { t } = useUiText();
+  const lines: string[] = [];
+  if (result.booksAdded > 0) lines.push(t("readestImport.done.books", { count: result.booksAdded }));
+  const marks = result.notesAdded + result.bookmarksAdded;
+  if (marks > 0) lines.push(t("readestImport.done.records", { notes: result.notesAdded, bookmarks: result.bookmarksAdded }));
+  if (result.progressWritten > 0) lines.push(t("readestImport.done.progress", { count: result.progressWritten }));
+  if (result.booksAlready > 0) lines.push(t("readestImport.done.already", { count: result.booksAlready }));
+  if (result.skippedExisting > 0) lines.push(t("readestImport.done.skipped", { count: result.skippedExisting }));
+  if (lines.length === 0) lines.push(t("readestImport.done.nothing"));
+  return <ul className="readest-summary">{lines.map((line) => <li key={line}>{line}</li>)}</ul>;
+}
+
+function DoneStep({ state, onCancel }: { state: Of<"done">; onCancel(): void }) {
+  const { t } = useUiText();
+  const { result } = state;
+  const [showFailed, setShowFailed] = useState(false);
+  const [showUnplaced, setShowUnplaced] = useState(false);
+  return (
+    <Shell subtitle={t("readestImport.list.source", { source: state.sourceLabel })}
+      actions={<button type="button" className="primary" onClick={onCancel}>{t("readestImport.finish")}</button>}>
+      <ResultLines result={result} />
+      {result.error && <p className="readest-bad" role="alert">{result.error}</p>}
+      {(result.stopped || result.error) && result.notReached > 0 && (
+        <p className="readest-warn">{t(result.stopped ? "readestImport.done.stopped" : "readestImport.done.notReached", { count: result.notReached })}</p>
+      )}
+      {result.failed.length > 0 && (
+        <div className="readest-group">
+          <button type="button" className="readest-fold" aria-expanded={showFailed} onClick={() => setShowFailed(!showFailed)}>
+            {t("readestImport.done.failed", { count: result.failed.length })}
+          </button>
+          {showFailed && result.failed.map((book, index) => (
+            <div className="readest-row readest-static" key={`${book.title}:${index}`}>
+              <span className="readest-row-text"><b>{book.title}</b><span>{book.reason}</span></span>
+            </div>
+          ))}
+        </div>
+      )}
+      {result.unplaced.length > 0 && (
+        <div className="readest-group">
+          <button type="button" className="readest-fold" aria-expanded={showUnplaced} onClick={() => setShowUnplaced(!showUnplaced)}>
+            {t("readestImport.done.unplaced", { count: result.unplaced.length })}
+          </button>
+          {showUnplaced && result.unplaced.map((record, index) => (
+            <div className="readest-row readest-static" key={index}>
+              <span className="readest-row-text">
+                <b>{record.title}</b>
+                <span>{t(`readestImport.unplaced.${record.kind}`)}{record.text ? ` · ${record.text}` : ""}</span>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      {result.unsupported > 0 && <p className="save-file-muted">{t("readestImport.done.unsupported", { count: result.unsupported })}</p>}
     </Shell>
   );
 }
 
 export function ReadestImportDialog(props: ReadestImportDialogProps) {
   const { state } = props;
-  if (state.kind === "match") return <MatchStep {...props} state={state} />;
-  if (state.kind === "review") return <ReviewStep {...props} state={state} />;
-  if (state.kind === "working") return <WorkingStep {...props} state={state} />;
-  return null;
+  switch (state.kind) {
+    case "idle": return null;
+    case "source": return <SourceStep {...props} state={state} />;
+    case "working": return <WorkingStep state={state} onCancel={props.onCancel} />;
+    case "list": return <ListStep {...props} state={state} />;
+    case "importing": return <ImportingStep state={state} onStop={props.onStop} />;
+    case "done": return <DoneStep state={state} onCancel={props.onCancel} />;
+  }
 }
