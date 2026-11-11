@@ -1,1 +1,14 @@
-{}
+{
+  "importProgress.starting": "正在開始匯入…",
+  "importProgress.committing": "正在儲存到書庫…",
+  "importProgress.processed": "已處理 {completed}/{total}",
+  "importProgress.preparing": "正在準備…",
+  "importProgress.expand": "展開匯入進度：{status}",
+  "importProgress.region": "匯入進度",
+  "importProgress.title": "正在匯入",
+  "importProgress.collapse": "收起匯入進度",
+  "importProgress.cancelRequested": "已請求取消，等待任務結束…",
+  "importProgress.tooLate": "提交已開始，繼續等待結果…",
+  "importProgress.cancel": "取消",
+  "importProgress.canceling": "取消中…"
+}

@@ -1,1 +1,13 @@
-{}
+{
+  "reader.toc": "目錄",
+  "reader.bookmarks": "書籤",
+  "reader.notes": "筆記",
+  "reader.hideSystemStatusBar": "閱讀時隱藏系統狀態列",
+  "reader.media.audio": "載入並播放音訊",
+  "reader.media.video": "載入並播放影片",
+  "reader.media.loading": "正在載入媒體…",
+  "reader.media.retry": "媒體載入失敗，點選重試",
+  "reader.media.unavailable": "未找到書內媒體檔案（暫不支援外部媒體連結）",
+  "reader.media.unsupported": "目前裝置無法播放此媒體格式",
+  "reader.media.play": "點選播放"
+}

@@ -1,1 +1,27 @@
-{}
+{
+  "footer.chapterN": "第 {n} 章",
+  "footer.scrub.chapterBook": "{title} · 全書 {percent}%",
+  "footer.scrub.page": "第 {page} / {total} 頁 · {title}",
+  "footer.chapterPercent": "本章 {percent}%",
+  "footer.mobile.page": "本章 {page}/{total} 頁",
+  "footer.mobile.pageRange": "本章 {first}–{last}/{total} 頁",
+  "footer.mobile.chapters": "{current}/{total} 章",
+  "footer.page": "本章 {page} / {total} 頁",
+  "footer.pageRange": "本章 {first}–{last} / {total} 頁",
+  "footer.chapters": "第 {current}/{total} 章",
+  "footer.book": "全書 {progress}",
+  "footer.preparing": "準備進度…",
+  "footer.region.mobile": "閱讀工具與進度",
+  "footer.region.desktop": "閱讀進度與導覽",
+  "footer.scrubber": "全書閱讀進度",
+  "footer.progress": "閱讀進度",
+  "footer.actions": "閱讀工具",
+  "footer.action.toc.label": "目錄、書籤與筆記",
+  "footer.action.toc": "目錄",
+  "footer.action.search.label": "搜尋內文",
+  "footer.action.search": "搜尋",
+  "footer.action.layout.label": "外觀與排版設定",
+  "footer.action.layout": "排版",
+  "footer.action.more.label": "更多閱讀操作",
+  "footer.action.more": "更多"
+}

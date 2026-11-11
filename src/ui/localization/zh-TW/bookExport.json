@@ -1,1 +1,27 @@
-{}
+{
+  "bookExport.action": "匯出書籍",
+  "bookExport.action.tip": "匯出選中書籍的原檔案：單本保留原格式，多本 ZIP",
+  "bookExport.all": "匯出全部書籍",
+  "bookExport.all.detail": "把書架上所有書的原檔案打包成一個 ZIP，用於備份或在其他閱讀器中使用。不含閱讀進度和筆記。",
+  "bookExport.dialogTitle": "匯出書籍原檔案",
+  "bookExport.filter.epub": "原書檔案",
+  "bookExport.filter.zip": "ZIP 壓縮包",
+  "bookExport.target.selected": "所選檔案",
+  "bookExport.progress": "正在匯出書籍原檔案",
+  "bookExport.done": "已匯出 {count} 本書的原檔案（{file}）",
+  "bookExport.partial": "已匯出 {written}/{requested} 本書的原檔案（{file}）；未匯出：{list}",
+  "bookExport.noBooks": "沒有匯出任何書，也沒有生成檔案：{list}",
+  "bookExport.cancelled": "已取消匯出書籍",
+  "bookExport.failed": "匯出書籍失敗：{error}",
+  "bookExport.partialOutput": "。儲存的檔案可能不完整，請刪除後重試",
+  "bookExport.error.space": "儲存空間不足",
+  "bookExport.error.busy": "已有匯出或匯入任務正在進行",
+  "bookExport.skippedItem": "《{title}》（{reason}）",
+  "bookExport.skippedMore": "等 {count} 本",
+  "bookExport.reason.notFound": "書架上沒有這本書",
+  "bookExport.reason.unbound": "沒有關聯的源檔案",
+  "bookExport.reason.missing": "源檔案找不到了",
+  "bookExport.reason.unreadable": "源檔案無法讀取",
+  "bookExport.reason.changed": "源檔案在匯出時被修改",
+  "bookExport.reason.other": "未匯出"
+}

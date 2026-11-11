@@ -1,1 +1,21 @@
-{}
+{
+  "log.title": "日誌與診斷",
+  "log.close": "關閉日誌與診斷",
+  "log.issues.one": "{count} 個問題",
+  "log.issues.other": "{count} 個問題",
+  "log.ok": "正常",
+  "log.records": "本次開書記錄",
+  "log.empty": "沒有記錄到異常問題。",
+  "log.diagnostics": "渲染狀態診斷",
+  "log.refresh": "重新整理診斷",
+  "log.diagnostics.capturedAt": "採集時間：{time}",
+  "log.resourceErrorRecord": "讀取錯誤記錄：{error}",
+  "log.diagnostics.pending": "（打開面板時自動採集）",
+  "log.diagnostics.unavailable": "（閱讀器未初始化）",
+  "log.copyDiagnostics": "複製診斷資訊",
+  "log.copyDiagnostics.hint": "僅含版本、平臺與執行環境，不含書籍與日誌。複製後可貼進問題反饋。",
+  "log.copyDiagnostics.copied": "已複製診斷資訊",
+  "log.copyDiagnostics.unavailable": "目前環境不支援讀取診斷資訊。",
+  "log.copyDiagnostics.collectFailed": "未能讀取診斷資訊，請稍後再試。",
+  "log.copyDiagnostics.clipboardFailed": "未能複製到剪貼簿，請再試一次。"
+}

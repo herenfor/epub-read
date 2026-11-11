@@ -1,1 +1,26 @@
-{}
+{
+  "fonts.dialog": "字型設定",
+  "fonts.title": "字型設定",
+  "fonts.back": "返回外觀與排版",
+  "fonts.current": "目前字型：{name}",
+  "fonts.followBook": "跟隨書籍",
+  "fonts.override": "覆蓋書籍字型",
+  "fonts.override.hint": "關閉時，所選字型只取代書未指定字型的文字；開啟後內文全部改用所選字型，程式碼與公式保留原字型。",
+  "fonts.search": "搜尋字型名稱",
+  "fonts.tab.system": "系統字型（{count}）",
+  "fonts.tab.imported": "已匯入（{count}）",
+  "fonts.tabs": "字型來源",
+  "fonts.system.loading": "正在讀取系統字型…",
+  "fonts.system.failed": "系統字型讀取失敗：{error}",
+  "fonts.unknownError": "未知錯誤",
+  "fonts.retry": "重試",
+  "fonts.unavailable": "目前裝置不可用：{name}",
+  "fonts.system.none": "未找到系統字型",
+  "fonts.imported.none": "尚未匯入字型",
+  "fonts.delete": "刪除字型",
+  "fonts.drop": "拖入字型檔案匯入",
+  "fonts.importing": "正在匯入字型…",
+  "fonts.dropRelease": "鬆開以匯入字型",
+  "fonts.dropHint": "可拖入 TTF、OTF、WOFF 或 WOFF2 字型",
+  "fonts.import": "＋ 匯入字型"
+}

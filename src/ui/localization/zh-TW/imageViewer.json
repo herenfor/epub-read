@@ -1,1 +1,12 @@
-{}
+{
+  "imageViewer.dialog": "圖片檢視",
+  "imageViewer.controls": "圖片檢視控制項",
+  "imageViewer.openLink": "開啟連結",
+  "imageViewer.zoomOut": "縮小",
+  "imageViewer.zoomIn": "放大",
+  "imageViewer.fit": "適配視窗",
+  "imageViewer.actualSize": "原始大小",
+  "imageViewer.compare.tip": "按住臨時檢視原圖，鬆開恢復濾鏡",
+  "imageViewer.compare": "原圖",
+  "imageViewer.close": "關閉"
+}

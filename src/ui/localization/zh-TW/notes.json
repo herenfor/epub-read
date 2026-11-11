@@ -1,1 +1,11 @@
-{}
+{
+  "notes.edit": "編輯筆記",
+  "notes.add": "新增筆記",
+  "notes.closeTitled": "關閉{title}",
+  "notes.placeholder": "寫下此刻的想法…",
+  "notes.content": "筆記內容",
+  "notes.empty": "筆記內容不能為空",
+  "notes.tooLong": "筆記內容不能超過 {limit} 個字元",
+  "notes.cancel": "取消",
+  "notes.save": "儲存"
+}

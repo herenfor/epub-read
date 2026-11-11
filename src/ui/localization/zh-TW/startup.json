@@ -1,1 +1,6 @@
-{}
+{
+  "startup.mismatch.title": "發行元件不相符",
+  "startup.mismatch.body": "前端與原生後端不是同一發行版，應用程式已停止啟動。",
+  "startup.failed.title": "無法驗證發行元件",
+  "startup.failed.body": "原生發行版交握失敗，應用程式已停止啟動。"
+}

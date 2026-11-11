@@ -1,1 +1,23 @@
-{}
+{
+  "tapRegions.title": "點選翻頁區域",
+  "tapRegions.preview.note": "預覽按目前閱讀區域的比例顯示，點按預覽不會翻頁",
+  "tapRegions.size": "區域大小",
+  "tapRegions.mode.default": "預設",
+  "tapRegions.mode.custom": "自訂",
+  "tapRegions.range.hint": "設為 0% 即關閉這一側",
+  "tapRegions.left": "左側",
+  "tapRegions.right": "右側",
+  "tapRegions.center": "中間",
+  "tapRegions.center.action": "內文操作",
+  "tapRegions.prev": "上一頁",
+  "tapRegions.next": "下一頁",
+  "tapRegions.off": "關閉",
+  "tapRegions.narrowed": "閱讀區域較窄，兩側已自動收窄以保留中間區域",
+  "tapRegions.scrollMode": "滾動模式不使用點選翻頁，設定在分頁模式生效",
+  "tapRegions.leftForward": "左側點選也下一頁",
+  "tapRegions.leftForward.hint": "開啟後左右兩側都翻到下一頁；滑動、鍵盤和其他返回方式不變",
+  "tapRegions.rightForward": "右側點選也下一頁",
+  "tapRegions.tapHint": "點選時顯示提示",
+  "tapRegions.tapHint.hint": "翻頁時在點按的一側短暫顯示箭頭",
+  "tapRegions.reset": "恢復預設"
+}

@@ -1,1 +1,7 @@
-{}
+{
+  "folder.name.empty": "資料夾名稱不能為空",
+  "folder.name.too-long": "名稱不能超過 {limit} 個字元",
+  "folder.name.duplicate": "已存在同名資料夾",
+  "folder.name.count": "{count}/{limit} 個字元",
+  "folder.name.label": "資料夾名稱"
+}
