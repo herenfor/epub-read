@@ -99,8 +99,9 @@ import type { ReaderNote } from "./ui/notes";
 import { hasOwnField, chapterLabelForIndex, useNoteEditRef, replaceNoteEditContext,
   useBookmarkToast, useBookmarkToastCleanup, useNoteBusyState, useNoteProjection, useNoteActions,
   useBookmarkProjection, useBookmarkSidebarToggle, useBookmarkActions, useBookmarkRibbonActions,
-  useNoteEditRelease } from "./ui/useBookmarksAndNotes";
+  useNoteEditRelease, BOOKMARK_UNDO_MS } from "./ui/useBookmarksAndNotes";
 import { NOTE_UNDO_MS, usePendingNoteDelete, useVisibleChapterNotes } from "./ui/pendingNoteDelete";
+import { useDeletedNotes } from "./ui/deletedNotesBin";
 import { useHighlightPreferences } from "./ui/highlightPreferences";
 import { highlightAtSelection } from "./ui/highlightModel";
 import { UndoPill, undoDetail } from "./ui/controls/UndoPill";
@@ -1286,22 +1287,58 @@ export default function App() {
     () => ({ style: highlightPreferences.style, color: highlightPreferences.color }),
     [highlightPreferences.style, highlightPreferences.color],
   );
-  const { handleSaveNote, createHighlight, restyleNote, deleteNoteIn, handleEditNote } = useNoteActions({
+  const { handleSaveNote, createHighlight, restoreNote, restyleNote, deleteNoteIn, handleEditNote } = useNoteActions({
     ...noteBusyState, currentShelfId, currentNotes, setShelfEntries, setRuntimeIssues,
     noteComposer, book, setForeground, shelfEntriesRef, openComposer, newHighlight,
   });
-  const { pendingNoteId, pendingOrigin, hiddenNoteIds, requestDelete: requestNoteDelete, undoDelete: undoNoteDelete } =
-    usePendingNoteDelete({ currentShelfId, commitDelete: deleteNoteIn });
+  // 最近删除（ER-0180）：删除真正写入后记到本机，可从侧栏恢复。
+  const { deletedNotes, rememberDeleted, forgetDeleted } = useDeletedNotes(currentShelfId);
+  const commitNoteDelete = useCallback(async (shelfId: string, noteId: string) => {
+    const note = shelfEntriesRef.current.find((entry) => entry.id === shelfId)?.notes?.find((item) => item.id === noteId);
+    const result = await deleteNoteIn(shelfId, noteId);
+    if (result === "done" && note) rememberDeleted(shelfId, note);
+    return result;
+  }, [deleteNoteIn, rememberDeleted]);
+  const { pendingDeletes, hiddenNoteIds, requestDelete: requestNoteDelete, undoDelete: undoNoteDelete } =
+    usePendingNoteDelete({ currentShelfId, commitDelete: commitNoteDelete });
   const { visibleChapterNotes, visibleNotesForChapter } =
     useVisibleChapterNotes(currentChapterNotes, notesForChapter, hiddenNoteIds);
-  const pendingDeletedNote = pendingNoteId ? currentNotes.find((note) => note.id === pendingNoteId) ?? null : null;
-  // A delete from the highlight menu floats its undo; the sidebar just leaves the card out.
-  const sidebarNotes = useMemo(
-    () => pendingOrigin === "reader" && pendingNoteId
-      ? noteViewModels.filter((note) => note.id !== pendingNoteId)
-      : noteViewModels,
-    [noteViewModels, pendingOrigin, pendingNoteId],
+  // 侧栏删的在原位显示撤销条；正文菜单删的浮在页面上，侧栏里直接不显示那张卡。
+  const sidebarPendingDeletes = useMemo(
+    () => new Map(pendingDeletes.filter((item) => item.origin === "sidebar").map((item) => [item.noteId, item.atMs])),
+    [pendingDeletes],
   );
+  const sidebarNotes = useMemo(() => {
+    const floated = new Set(pendingDeletes.filter((item) => item.origin === "reader").map((item) => item.noteId));
+    return floated.size ? noteViewModels.filter((note) => !floated.has(note.id)) : noteViewModels;
+  }, [noteViewModels, pendingDeletes]);
+  // 浮动撤销条只显示最近一条；撤销后露出上一条，按它自己剩下的时间继续走。
+  const floatingDelete = useMemo(
+    () => pendingDeletes.filter((item) => item.origin === "reader").at(-1) ?? null,
+    [pendingDeletes],
+  );
+  const floatingDeletedNote = floatingDelete ? currentNotes.find((note) => note.id === floatingDelete.noteId) ?? null : null;
+  const deletedNoteViews = useMemo(() => deletedNotes.map(({ note }) => ({
+    id: note.id,
+    content: note.content,
+    selectedText: note.selectedText,
+    chapterTitle: book ? chapterLabelForIndex(book, note.spineIndex) : "",
+    createdAtMs: note.createdAtMs,
+    ...(note.color ? { color: note.color } : {}),
+    ...(note.style ? { style: note.style } : {}),
+  })), [deletedNotes, book]);
+  const bookmarkUndoToast = bookmarkToast?.undo && !bookmarkToast.closing ? bookmarkToast : null;
+  // 书签和笔记的撤销条共用同一个位置：显示较新的那条。
+  const showNoteUndo = Boolean(floatingDelete && floatingDeletedNote)
+    && (!bookmarkUndoToast || floatingDelete!.atMs >= bookmarkUndoToast.atMs);
+  const handleRestoreDeletedNote = useCallback((noteId: string) => {
+    const item = deletedNotes.find((entry) => entry.note.id === noteId);
+    const shelfId = currentShelfId;
+    if (!item || !shelfId) return;
+    void restoreNote(item.note).then((ok) => {
+      if (ok) forgetDeleted(shelfId, noteId);
+    });
+  }, [deletedNotes, currentShelfId, restoreNote, forgetDeleted]);
 
   const handleNoteNavigate = useCallback((note: ReaderNote): void => {
     if (!book || noteBusy) return;
@@ -2619,8 +2656,10 @@ export default function App() {
             const note = currentNotes.find((candidate) => candidate.id === viewNote.id);
             if (note) openShare({ quote: note.selectedText, note: note.content, accent: note.color, spineIndex: note.spineIndex });
           }}
-          pendingDeleteNoteId={pendingNoteId}
+          pendingDeleteNotes={sidebarPendingDeletes}
           onUndoDeleteNote={undoNoteDelete}
+          deletedNotes={deletedNoteViews}
+          onRestoreDeletedNote={handleRestoreDeletedNote}
         />
       )}
       <div className="main">
@@ -3360,21 +3399,33 @@ export default function App() {
           <span className="bookmark-toast-text">{t("appUi.exitHint")}</span>
         </div>
       )}
-      {pendingOrigin === "reader" && pendingDeletedNote && (
+      {showNoteUndo && floatingDelete && floatingDeletedNote && (
         <UndoPill
-          key={pendingDeletedNote.id}
+          key={floatingDeletedNote.id}
           className="reader-undo-pill"
-          message={pendingDeletedNote.content ? t("sidebar.note.deleted") : t("sidebar.highlight.deleted")}
-          detail={undoDetail(pendingDeletedNote.content || pendingDeletedNote.selectedText)}
+          message={floatingDeletedNote.content ? t("sidebar.note.deleted") : t("sidebar.highlight.deleted")}
+          detail={undoDetail(floatingDeletedNote.content || floatingDeletedNote.selectedText)}
           undoLabel={t("sidebar.note.undo")}
-          onUndo={undoNoteDelete}
+          onUndo={() => undoNoteDelete(floatingDeletedNote.id)}
           durationMs={NOTE_UNDO_MS}
+          startedAtMs={floatingDelete.atMs}
         />
       )}
-      {bookmarkToast && (
+      {bookmarkUndoToast && !showNoteUndo && (
+        <UndoPill
+          key={`bookmark-${bookmarkUndoToast.id}`}
+          className="reader-undo-pill"
+          message={bookmarkUndoToast.text}
+          undoLabel={t("notice.bookmark.undo")}
+          onUndo={() => undoBookmarkRemoval()}
+          durationMs={BOOKMARK_UNDO_MS}
+          startedAtMs={bookmarkUndoToast.atMs}
+        />
+      )}
+      {bookmarkToast && !bookmarkToast.undo && (
         <div
           key={bookmarkToast.id}
-          className={`reader-bookmark-toast ${bookmarkToast.action}${bookmarkToast.closing ? " is-closing" : ""}${bookmarkToast.undo ? " has-undo" : ""}`}
+          className={`reader-bookmark-toast ${bookmarkToast.action}${bookmarkToast.closing ? " is-closing" : ""}`}
           role="status"
           aria-live="polite"
         >
@@ -3391,11 +3442,6 @@ export default function App() {
             )}
           </span>
           <span className="bookmark-toast-text">{bookmarkToast.text}</span>
-          {bookmarkToast.undo && (
-            <button type="button" className="bookmark-toast-undo" onClick={() => undoBookmarkRemoval()}>
-              {t("notice.bookmark.undo")}
-            </button>
-          )}
         </div>
       )}
       {view === "reader" && warming("bookmark-pages") && (

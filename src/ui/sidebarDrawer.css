@@ -700,3 +700,81 @@
 .sidebar-drawer.is-docked.side-right.is-closing {
   animation: var(--sheet-exit);
 }
+
+/* 最近删除（ER-0180）：笔记页底部的入口，以及点开后的列表。 */
+.sidebar-notes-bin-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  width: calc(100% - 16px);
+  min-height: 36px;
+  margin: 10px 8px 0;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: var(--btn-tint-hover);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-caption);
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--ui-control-quick) var(--ui-ease);
+}
+
+.sidebar-notes-bin-entry:hover,
+.sidebar-notes-bin-entry:focus-visible {
+  color: var(--fg);
+}
+
+.sidebar-notes-bin-entry > svg {
+  flex: none;
+}
+
+.sidebar-notes-bin-count {
+  margin-left: auto;
+  padding: 1px 7px;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar-notes-bin-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 4px;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.sidebar-notes-bin-back {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.sidebar-notes-bin-back:hover,
+.sidebar-notes-bin-back:focus-visible {
+  background: var(--btn-tint-hover);
+  color: var(--fg);
+}
+
+.sidebar-notes-bin-hint {
+  margin: 0 8px 10px;
+  color: var(--muted);
+  font-size: var(--fs-caption);
+  line-height: 1.5;
+}
+
+.sidebar-note-main.is-static {
+  cursor: default;
+}

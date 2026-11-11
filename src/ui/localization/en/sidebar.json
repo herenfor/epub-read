@@ -34,5 +34,9 @@
   "sidebar.note.delete": "Delete",
   "sidebar.note.deleted": "Note deleted",
   "sidebar.highlight.deleted": "Highlight deleted",
-  "sidebar.note.undo": "Undo"
+  "sidebar.note.undo": "Undo",
+  "sidebar.notes.bin": "Recently deleted",
+  "sidebar.notes.bin.back": "Back to notes",
+  "sidebar.notes.bin.hint": "Keeps the last 10 notes and highlights deleted from this book, on this device only. Beyond 10, the oldest one is replaced.",
+  "sidebar.notes.bin.restore": "Restore"
 }

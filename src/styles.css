@@ -2823,6 +2823,11 @@ select option {
   bottom: calc(var(--mobile-reader-bottombar, 124px) + env(safe-area-inset-bottom, 0px) + 12px);
 }
 
+/* 书签和笔记的撤销条在手机上同样让开底栏（ER-0180）。 */
+.app[data-mobile-reader="true"] .reader-undo-pill {
+  bottom: calc(var(--mobile-reader-bottombar, 124px) + env(safe-area-inset-bottom, 0px) + 12px);
+}
+
 /* ---- 书签状态轻量反馈弹窗（底部居中微光毛玻璃胶囊浮层） ---- */
 .reader-bookmark-toast {
   position: fixed;
@@ -2854,37 +2859,10 @@ select option {
   will-change: transform, opacity;
 }
 
-/* A15：删除书签后带“撤销”，此时提示条接收点击。 */
-.reader-bookmark-toast.has-undo {
-  pointer-events: auto;
-  padding-right: 6px;
-}
-
 .reader-bookmark-toast .bookmark-toast-text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.reader-bookmark-toast .bookmark-toast-undo {
-  flex-shrink: 0;
-  box-sizing: border-box;
-  height: 28px;
-  margin-left: 4px;
-  padding: 0 12px;
-  border: 0;
-  border-radius: var(--r-full);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  color: var(--accent);
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.reader-bookmark-toast .bookmark-toast-undo:hover,
-.reader-bookmark-toast .bookmark-toast-undo:focus-visible {
-  background: color-mix(in srgb, var(--accent) 20%, transparent);
-  outline: none;
 }
 
 /* 提示类退场：淡出，短于 BOOKMARK_TOAST_EXIT_MS。 */
@@ -5957,6 +5935,15 @@ select option {
 
 .app[data-touch-ui="true"] .sidebar-drawer .sidebar-note-selection {
   font-size: var(--fs-body);
+}
+
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-notes-bin-entry {
+  min-height: 44px;
+}
+
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-notes-bin-back {
+  width: 44px;
+  height: 44px;
 }
 
 .app[data-touch-ui="true"] .sidebar-drawer .sidebar-note-act {

@@ -6,7 +6,7 @@ import { limitNotes, TOC_EXPAND_ALL_LIMIT, type NoteViewModel } from "./sidebarM
 import { activeTocEntry, indexToc, visibleTocRows, type IndexedTocNode } from "./sidebarToc";
 import { SidebarTocList } from "./SidebarTocList";
 import type { Bookmark } from "./shelf";
-import { BookmarkIcon, CloseIcon, PencilIcon, PinIcon, ShareIcon, TrashIcon } from "./readerIcons";
+import { ArrowLeftIcon, BookmarkIcon, CloseIcon, PencilIcon, PinIcon, ShareIcon, TrashIcon } from "./readerIcons";
 import "./sidebarDrawer.css";
 import { UndoPill, undoDetail } from "./controls/UndoPill";
 import { highlightColorProps } from "./highlightModel";
@@ -57,10 +57,16 @@ export interface SidebarDrawerProps {
   onDeleteNote?: (note: NoteViewModel) => void;
   /** Opens the share card for this note (ER-0119). */
   onShareNote?: (note: NoteViewModel) => void;
-  /** A note deleted a moment ago: its card shows the undo pill in place. */
-  pendingDeleteNoteId?: string | null;
-  onUndoDeleteNote?: () => void;
+  /** Notes deleted a moment ago (id → when): each card shows its own undo pill in place. */
+  pendingDeleteNotes?: ReadonlyMap<string, number>;
+  onUndoDeleteNote?: (noteId: string) => void;
+  /** Recently deleted notes of this book, newest first (ER-0180). */
+  deletedNotes?: readonly NoteViewModel[];
+  onRestoreDeletedNote?: (noteId: string) => void;
 }
+
+const NO_PENDING_DELETES: ReadonlyMap<string, number> = new Map();
+const NO_DELETED_NOTES: readonly NoteViewModel[] = [];
 
 function formatDate(timestamp: number): string {
   if (!Number.isFinite(timestamp)) return uiText("sidebar.unknownTime");
@@ -91,7 +97,9 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
   onEditNote,
   onDeleteNote,
   onShareNote,
-  pendingDeleteNoteId = null,
+  pendingDeleteNotes = NO_PENDING_DELETES,
+  deletedNotes = NO_DELETED_NOTES,
+  onRestoreDeletedNote,
   onUndoDeleteNote,
 }) => {
   const { t } = useUiText();
@@ -204,7 +212,10 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
 
   const tocRows = useMemo(() => visibleTocRows(tocIndex, tocExpanded, tocFilter), [tocIndex, tocExpanded, tocFilter]);
   const sortedNotes = useMemo(() => limitNotes(notes, 200).items, [notes]);
-  const shownNoteCount = notes.length - (pendingDeleteNoteId && notes.some((note) => note.id === pendingDeleteNoteId) ? 1 : 0);
+  const shownNoteCount = notes.reduce((count, note) => count + (pendingDeleteNotes.has(note.id) ? 0 : 1), 0);
+  // 最近删除列表：离开笔记页签或列表清空后回到笔记。
+  const [binOpen, setBinOpen] = useState(false);
+  const showBin = binOpen && activeTab === "notes" && deletedNotes.length > 0;
 
   if (!open && mode === "overlay" && !isClosing && !warm) {
     return null;
@@ -393,22 +404,66 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
 
           {/* TAB 3: 笔记 */}
             <div className="sidebar-pane sidebar-notes-pane" {...paneProps("notes")}>
-              {sortedNotes.length === 0 ? (
+              {showBin ? (
+                <div className="sidebar-notes-bin">
+                  <div className="sidebar-notes-bin-head">
+                    <button type="button" className="sidebar-notes-bin-back" onClick={() => setBinOpen(false)}
+                      aria-label={t("sidebar.notes.bin.back")} title={t("sidebar.notes.bin.back")}>
+                      <ArrowLeftIcon size={16} />
+                    </button>
+                    <span>{t("sidebar.notes.bin")}</span>
+                  </div>
+                  <p className="sidebar-notes-bin-hint">{t("sidebar.notes.bin.hint")}</p>
+                  <div className="sidebar-notes-list">
+                    {deletedNotes.map((note) => {
+                      const tone = highlightColorProps(note.color);
+                      return (
+                        <article className={`sidebar-note-card ${tone.className}`} style={tone.style} key={note.id}>
+                          <span className="sidebar-note-bar" aria-hidden="true" />
+                          <div className="sidebar-note-main is-static">
+                            {note.content ? (
+                              <span className="sidebar-note-content">{note.content}</span>
+                            ) : (
+                              <span className="sidebar-note-content is-quote" title={note.selectedText}>
+                                {t("sidebar.note.quote", { text: note.selectedText })}
+                              </span>
+                            )}
+                            <span className="sidebar-note-meta">
+                              {note.chapterTitle} · {formatDate(note.createdAtMs)}
+                            </span>
+                            {note.content && (
+                              <span className="sidebar-note-selection" title={note.selectedText}>
+                                {t("sidebar.note.quote", { text: note.selectedText })}
+                              </span>
+                            )}
+                          </div>
+                          <div className="sidebar-note-actions">
+                            <button type="button" className="sidebar-note-act" onClick={() => onRestoreDeletedNote?.(note.id)}>
+                              {t("sidebar.notes.bin.restore")}
+                            </button>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : sortedNotes.length === 0 ? (
                 <div className="sidebar-empty">
                   <span>{t("sidebar.notes.empty")}</span>
                   <span className="sidebar-empty-tip">{t("sidebar.notes.emptyTip")}</span>
                 </div>
               ) : (
                 <div className="sidebar-notes-list">
-                  {sortedNotes.map((note) => note.id === pendingDeleteNoteId ? (
+                  {sortedNotes.map((note) => pendingDeleteNotes.has(note.id) ? (
                     <UndoPill
                       key={note.id}
                       className="sidebar-note-undo"
                       message={note.content ? t("sidebar.note.deleted") : t("sidebar.highlight.deleted")}
                       detail={undoDetail(note.content || note.selectedText)}
                       undoLabel={t("sidebar.note.undo")}
-                      onUndo={() => onUndoDeleteNote?.()}
+                      onUndo={() => onUndoDeleteNote?.(note.id)}
                       durationMs={NOTE_UNDO_MS}
+                      startedAtMs={pendingDeleteNotes.get(note.id)}
                       autoFocus
                     />
                   ) : (() => {
@@ -476,6 +531,13 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
                     );
                   })())}
                 </div>
+              )}
+              {!showBin && deletedNotes.length > 0 && (
+                <button type="button" className="sidebar-notes-bin-entry" onClick={() => setBinOpen(true)}>
+                  <TrashIcon size={14} />
+                  <span>{t("sidebar.notes.bin")}</span>
+                  <span className="sidebar-notes-bin-count">{deletedNotes.length}</span>
+                </button>
               )}
             </div>
           </div>

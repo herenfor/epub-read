@@ -20,10 +20,9 @@ import { prefersReducedMotion } from "./pagedSlide";
 import type { NoteDeleteResult } from "./pendingNoteDelete";
 
 const EMPTY_NOTES: ReaderNote[] = [];
-/** 删除提示（带撤销）停留时长；Ctrl+Z 也只在这段时间内有效。 */
-/** 删除后可撤销的期限（提示条消失后 Ctrl+Z 仍可用到这时）。 */
-const BOOKMARK_UNDO_MS = 5000;
-/** A17：添加、删除、已恢复的提示一律停留这么久，再播缩回。 */
+/** 删除后可撤销的期限：撤销条停留这么久，Ctrl+Z 也只在这段时间内有效。 */
+export const BOOKMARK_UNDO_MS = 5000;
+/** A17：添加、已恢复等不带撤销的提示停留这么久，再播缩回。 */
 const BOOKMARK_TOAST_MS = 2000;
 /** 与 styles.css 的 bookmark-toast-out 时长一致：播完才卸载。 */
 const BOOKMARK_TOAST_EXIT_MS = 220;
@@ -171,6 +170,8 @@ export function useBookmarkToast() {
     closing: boolean;
     /** A15：删除后带“撤销”。 */
     undo?: boolean;
+    /** 带撤销的提示从这一刻起停留整个撤销期限（ER-0180：与笔记撤销条一致）。 */
+    atMs: number;
   } | null>(null);
   const bookmarkToastTimerRef = useRef<number | null>(null);
   const bookmarkToastIdRef = useRef(0);
@@ -182,7 +183,7 @@ export function useBookmarkToast() {
     }
     const undo = options?.undo === true;
     const id = ++bookmarkToastIdRef.current;
-    setBookmarkToast({ id, text, action, closing: false, ...(undo ? { undo } : {}) });
+    setBookmarkToast({ id, text, action, closing: false, atMs: Date.now(), ...(undo ? { undo } : {}) });
     // 计时只作用于自己这一条：之后来的新提示不会被旧计时收起或删掉。
     bookmarkToastTimerRef.current = window.setTimeout(() => {
       setBookmarkToast((prev) => (prev?.id === id ? { ...prev, closing: true } : prev));
@@ -190,7 +191,7 @@ export function useBookmarkToast() {
         setBookmarkToast((prev) => (prev?.id === id ? null : prev));
         bookmarkToastTimerRef.current = null;
       }, BOOKMARK_TOAST_EXIT_MS);
-    }, BOOKMARK_TOAST_MS);
+    }, undo ? BOOKMARK_UNDO_MS : BOOKMARK_TOAST_MS);
   }, []);
   return { bookmarkToast, bookmarkToastTimerRef, showBookmarkToast };
 }
@@ -405,6 +406,21 @@ export function useNoteActions({ currentShelfId, currentNotes, noteBusyRef, setN
   }, [book, currentShelfId, currentNotes, saveNoteChange, setRuntimeIssues]);
 
   /**
+   * Puts a recently deleted note back (ER-0180). It returns under a new id,
+   * like a restored bookmark, so sync sees a create and not a revived delete.
+   */
+  const restoreNote = useCallback(async (note: ReaderNote): Promise<boolean> => {
+    if (!currentShelfId) return false;
+    const restored: ReaderNote = { ...note, id: generateFolderId(), updatedAtMs: Date.now() };
+    const next = [...currentNotes, restored];
+    const shelfId = currentShelfId;
+    return saveNoteChange(shelfId, currentNotes, next, () => {
+      const store = getShelfStore();
+      return store.createNote ? store.createNote(shelfId, restored) : store.setNotes(shelfId, next);
+    });
+  }, [currentShelfId, currentNotes, saveNoteChange]);
+
+  /**
    * Restyle choices made while another note write holds the gate. Each note
    * keeps the merge of its choices, so the last tap wins; they are written
    * once the gate opens (after that render, so the stamp read is current).
@@ -506,7 +522,7 @@ export function useNoteActions({ currentShelfId, currentNotes, noteBusyRef, setN
     }
   }, [currentNotes, currentShelfId, openComposer]);
 
-  return { handleSaveNote, createHighlight, restyleNote, deleteNoteIn, handleEditNote };
+  return { handleSaveNote, createHighlight, restoreNote, restyleNote, deleteNoteIn, handleEditNote };
 }
 
 export function useBookmarkProjection({ currentShelfId, shelfEntries, chapterState, readerRef, spineIndex, book }: {

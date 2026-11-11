@@ -57,7 +57,7 @@
   background: currentColor;
   opacity: 0.35;
   transform-origin: left center;
-  animation: ui-undo-pill-drain var(--ui-undo-ms, 5000ms) linear forwards;
+  animation: ui-undo-pill-drain var(--ui-undo-ms, 5000ms) linear var(--ui-undo-delay, 0ms) forwards;
 }
 
 @keyframes ui-undo-pill-drain {

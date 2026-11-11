@@ -162,7 +162,7 @@ describe("Zen UI SidebarDrawer 组件与交互契约（Packet B）", () => {
     expect(live).toContain("笔记 (2)");
     const html = renderToStaticMarkup(
       createElement(SidebarDrawer, { ...baseProps, activeTab: "notes", notes, onDeleteNote: vi.fn(),
-        pendingDeleteNoteId: "note1", onUndoDeleteNote: vi.fn() })
+        pendingDeleteNotes: new Map([["note1", Date.now()]]), onUndoDeleteNote: vi.fn() })
     );
     expect(html.match(/sidebar-note-card/g)).toHaveLength(1);
     expect(html).toContain("ui-undo-pill");
@@ -170,6 +170,26 @@ describe("Zen UI SidebarDrawer 组件与交互契约（Packet B）", () => {
     expect(html).toContain("我的读书笔记");
     expect(html).toContain("撤销");
     expect(html).toContain("笔记 (1)");
+
+    // 连续删除：每条各有一条撤销条。
+    const both = renderToStaticMarkup(
+      createElement(SidebarDrawer, { ...baseProps, activeTab: "notes", notes, onDeleteNote: vi.fn(),
+        pendingDeleteNotes: new Map([["note1", Date.now()], ["note2", Date.now()]]), onUndoDeleteNote: vi.fn() })
+    );
+    expect(both.match(/ui-undo-pill /g)).toHaveLength(2);
+    expect(both).not.toContain("sidebar-note-card");
+  });
+
+  it("有最近删除的内容时笔记页底部出现入口和条数，没有时不出现", () => {
+    const none = renderToStaticMarkup(createElement(SidebarDrawer, { ...baseProps, activeTab: "notes", notes: sampleNotes }));
+    expect(none).not.toContain("sidebar-notes-bin-entry");
+    const html = renderToStaticMarkup(
+      createElement(SidebarDrawer, { ...baseProps, activeTab: "notes", notes: [],
+        deletedNotes: [{ ...sampleNotes[0], id: "gone" }], onRestoreDeletedNote: vi.fn() })
+    );
+    expect(html).toContain("sidebar-notes-bin-entry");
+    expect(html).toContain("最近删除");
+    expect(html).toContain('sidebar-notes-bin-count">1<');
   });
 
   it("笔记条目带颜色条；纯高亮以原文为正文、按钮为添加笔记", () => {

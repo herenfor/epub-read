@@ -12,41 +12,53 @@ export type NoteDeleteResult = "done" | "busy" | "failed";
 /** Where the delete was made: the sidebar shows its undo in place, the reader floats it. */
 export type NoteDeleteOrigin = "sidebar" | "reader";
 
-interface PendingNoteDelete {
+export interface PendingNoteDelete {
   shelfId: string;
   noteId: string;
   origin: NoteDeleteOrigin;
+  /** When the delete was asked for: the undo pill's drain starts from here. */
+  atMs: number;
 }
 
 const NO_IDS: readonly string[] = [];
+const NO_PENDING: readonly PendingNoteDelete[] = [];
 
 /**
  * One-step note delete with undo (ER-0105). The note is only hidden while
  * the undo is offered and the delete is written when that time runs out, so
  * undo writes nothing and sync never sees a delete followed by a re-create.
- * A newer delete or leaving the book commits the previous one at once;
- * quitting the app inside the window keeps the note.
+ * Several deletes can wait side by side, each on its own clock and undone on
+ * its own (ER-0180). Leaving the book commits them all at once; quitting the
+ * app inside the window keeps the notes.
  */
 export function usePendingNoteDelete({ currentShelfId, commitDelete }: {
   currentShelfId: string | null;
   commitDelete(shelfId: string, noteId: string): Promise<NoteDeleteResult>;
 }) {
-  const [pending, setPending] = useState<PendingNoteDelete | null>(null);
+  const [pending, setPending] = useState<readonly PendingNoteDelete[]>(NO_PENDING);
   /** Notes whose delete is being written: still hidden until the write settles. */
   const [committing, setCommitting] = useState<readonly string[]>(NO_IDS);
-  const pendingRef = useRef<PendingNoteDelete | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const pendingRef = useRef<readonly PendingNoteDelete[]>(NO_PENDING);
+  const timersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const commitRef = useRef(commitDelete);
   useLayoutEffect(() => {
     commitRef.current = commitDelete;
   });
 
-  const flush = useCallback(() => {
-    const item = pendingRef.current;
+  /** Takes one waiting delete out of the list; null when it is no longer waiting. */
+  const take = useCallback((noteId: string): PendingNoteDelete | null => {
+    const item = pendingRef.current.find((entry) => entry.noteId === noteId);
+    if (!item) return null;
+    clearTimeout(timersRef.current.get(noteId));
+    timersRef.current.delete(noteId);
+    pendingRef.current = pendingRef.current.filter((entry) => entry !== item);
+    setPending(pendingRef.current);
+    return item;
+  }, []);
+
+  const commit = useCallback((noteId: string) => {
+    const item = take(noteId);
     if (!item) return;
-    pendingRef.current = null;
-    clearTimeout(timerRef.current);
-    setPending(null);
     setCommitting((ids) => [...ids, item.noteId]);
     const settle = () => setCommitting((ids) => ids.filter((id) => id !== item.noteId));
     const attempt = (tries: number): void => {
@@ -59,41 +71,47 @@ export function usePendingNoteDelete({ currentShelfId, commitDelete }: {
       );
     };
     attempt(0);
-  }, []);
+  }, [take]);
 
   const requestDelete = useCallback((noteId: string, origin: NoteDeleteOrigin = "sidebar") => {
     if (!currentShelfId) return;
-    if (pendingRef.current?.noteId === noteId) return;
-    flush();
-    const item = { shelfId: currentShelfId, noteId, origin };
-    pendingRef.current = item;
-    setPending(item);
-    timerRef.current = setTimeout(flush, NOTE_UNDO_MS);
-  }, [currentShelfId, flush]);
+    if (pendingRef.current.some((entry) => entry.noteId === noteId)) return;
+    const item: PendingNoteDelete = { shelfId: currentShelfId, noteId, origin, atMs: Date.now() };
+    pendingRef.current = [...pendingRef.current, item];
+    setPending(pendingRef.current);
+    timersRef.current.set(noteId, setTimeout(() => commit(noteId), NOTE_UNDO_MS));
+  }, [currentShelfId, commit]);
 
-  const undoDelete = useCallback(() => {
-    if (!pendingRef.current) return;
-    pendingRef.current = null;
-    clearTimeout(timerRef.current);
-    setPending(null);
+  const undoDelete = useCallback((noteId: string) => {
+    take(noteId);
+  }, [take]);
+
+  // Closing or switching the book ends every undo window of the book left behind.
+  useEffect(() => {
+    for (const item of pendingRef.current) {
+      if (item.shelfId !== currentShelfId) commit(item.noteId);
+    }
+  }, [currentShelfId, commit]);
+
+  // Unmount means the app is going away: drop the timers, keep the notes.
+  useEffect(() => {
+    const timers = timersRef.current;
+    return () => {
+      for (const timer of timers.values()) clearTimeout(timer);
+      timers.clear();
+    };
   }, []);
 
-  // Closing or switching the book ends the undo window.
-  useEffect(() => {
-    if (pendingRef.current && pendingRef.current.shelfId !== currentShelfId) flush();
-  }, [currentShelfId, flush]);
-
-  // Unmount means the app is going away: drop the timer, keep the note.
-  useEffect(() => () => clearTimeout(timerRef.current), []);
-
-  const live = pending && pending.shelfId === currentShelfId ? pending : null;
-  const pendingNoteId = live?.noteId ?? null;
-  const pendingOrigin = live?.origin ?? null;
-  const hiddenNoteIds = useMemo(
-    () => (pendingNoteId ? [...committing, pendingNoteId] : committing),
-    [committing, pendingNoteId],
+  /** Deletes still waiting in the open book, oldest first. */
+  const pendingDeletes = useMemo(
+    () => pending.filter((item) => item.shelfId === currentShelfId),
+    [pending, currentShelfId],
   );
-  return { pendingNoteId, pendingOrigin, hiddenNoteIds, requestDelete, undoDelete };
+  const hiddenNoteIds = useMemo(
+    () => (pendingDeletes.length ? [...committing, ...pendingDeletes.map((item) => item.noteId)] : committing),
+    [committing, pendingDeletes],
+  );
+  return { pendingDeletes, hiddenNoteIds, requestDelete, undoDelete };
 }
 
 /**

@@ -38,4 +38,8 @@ export const sidebar = defineMessages("sidebar", {
   "sidebar.note.deleted": { zh: "已删除笔记", note: "Undo pill that replaces a deleted note card for a few seconds.", max: 16 },
   "sidebar.highlight.deleted": { zh: "已删除高亮", note: "Undo pill after deleting a highlight that has no note.", max: 16 },
   "sidebar.note.undo": { zh: "撤销", note: "Button in the deleted-note pill; restores the note.", max: 8 },
+  "sidebar.notes.bin": { zh: "最近删除", note: "Entry and title of the list of recently deleted notes and highlights.", max: 20 },
+  "sidebar.notes.bin.back": { zh: "返回笔记", note: "Back button from the recently deleted list to the notes list.", max: 20 },
+  "sidebar.notes.bin.hint": "保留这本书最近删除的 10 条笔记和高亮，只存在这台设备上。超过 10 条时最早的一条会被替换。",
+  "sidebar.notes.bin.restore": { zh: "恢复", note: "Puts a recently deleted note back into the book.", max: 10 },
 });

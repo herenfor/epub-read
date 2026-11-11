@@ -253,26 +253,46 @@ describe("annotation responsibilities extracted from App", () => {
       const chapter = t.current().visibleChapterNotes;
       expect(chapter.map((item) => item.id)).toEqual(["n", "m"]);
       await t.dom.run(() => t.current().requestDelete("n"));
-      expect(t.current().pendingNoteId).toBe("n");
+      expect(t.current().pendingDeletes.map((item) => item.noteId)).toEqual(["n"]);
       expect(t.current().visibleChapterNotes.map((item) => item.id)).toEqual(["m"]);
       expect(t.current().visibleNotesForChapter(0)).toBe(t.current().visibleNotesForChapter(0));
       expect(t.current().noteViewModels.map((item) => item.id)).toEqual(["n", "m"]);
-      await t.dom.run(() => t.current().undoDelete());
+      await t.dom.run(() => t.current().undoDelete("n"));
       await t.advance(NOTE_UNDO_MS);
       expect(t.store.deleteNote).not.toHaveBeenCalled();
-      expect(t.current().pendingNoteId).toBeNull();
+      expect(t.current().pendingDeletes).toEqual([]);
       expect(t.current().visibleChapterNotes).toBe(t.current().currentChapterNotes);
+    } finally { await t.dispose(); }
+  });
 
+  it("keeps consecutive deletes side by side: each has its own clock and its own undo (ER-0161)", async () => {
+    const t = setup();
+    try {
+      await t.render();
+      const other = { ...note, id: "m", content: "other" };
+      const third = { ...note, id: "k", content: "third" };
+      await t.dom.run(() => t.current().setShelfEntries([{ ...entry, notes: [note, other, third] }]));
       await t.dom.run(() => t.current().requestDelete("n"));
-      await t.dom.run(() => t.current().requestDelete("m"));
+      await t.advance(2000);
+      await t.dom.run(() => t.current().requestDelete("m", "reader"));
+      await t.dom.run(() => t.current().requestDelete("k"));
+      // The second and third delete do not commit the first.
+      expect(t.store.deleteNote).not.toHaveBeenCalled();
+      expect(t.current().pendingDeletes.map((item) => [item.noteId, item.origin])).toEqual([["n", "sidebar"], ["m", "reader"], ["k", "sidebar"]]);
+      expect(t.current().visibleChapterNotes).toEqual([]);
+
+      // Undoing one leaves the others waiting.
+      await t.dom.run(() => t.current().undoDelete("m"));
+      expect(t.current().visibleChapterNotes.map((item) => item.id)).toEqual(["m"]);
+      await t.advance(NOTE_UNDO_MS - 2000);
       expect(t.store.deleteNote).toHaveBeenCalledTimes(1);
       expect(t.store.deleteNote).toHaveBeenLastCalledWith("book", "n");
-      expect(t.current().pendingNoteId).toBe("m");
-      await t.advance(NOTE_UNDO_MS - 1);
-      expect(t.store.deleteNote).toHaveBeenCalledTimes(1);
-      await t.advance(1);
-      expect(t.store.deleteNote).toHaveBeenLastCalledWith("book", "m");
-      expect(t.current().pendingNoteId).toBeNull();
+      expect(t.current().pendingDeletes.map((item) => item.noteId)).toEqual(["k"]);
+      await t.advance(2000);
+      expect(t.store.deleteNote).toHaveBeenCalledTimes(2);
+      expect(t.store.deleteNote).toHaveBeenLastCalledWith("book", "k");
+      expect(t.store.deleteNote).not.toHaveBeenCalledWith("book", "m");
+      expect(t.current().pendingDeletes).toEqual([]);
     } finally { await t.dispose(); }
   });
 
@@ -347,8 +367,10 @@ describe("annotation responsibilities extracted from App", () => {
       // A new message is a new toast; the old exit timer cannot close or drop it.
       expect(t.current().bookmarkToast).toMatchObject({ text: "removed", action: "remove", closing: false, undo: true });
       expect(t.current().bookmarkToast!.id).not.toBe(first);
-      // A17: the undo toast shows as long as the others, then plays its exit before unmounting.
+      // ER-0180: the undo toast stays for the whole undo window, then plays its exit before unmounting.
       await t.advance(1780);
+      expect(t.current().bookmarkToast!.closing).toBe(false);
+      await t.advance(3000);
       expect(t.current().bookmarkToast!.closing).toBe(true);
       await t.advance(219);
       expect(t.current().bookmarkToast).not.toBeNull();
