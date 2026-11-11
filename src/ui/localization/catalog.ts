@@ -5,8 +5,10 @@
  * 1. catalogs/<name>.ts — `defineMessages("<name>", { "<name>.key": "中文" })`;
  *    use `{ zh, note, max }` when a translator needs context or a length budget,
  *    and "<base>.one"/"<base>.other" pairs for count-dependent text.
- * 2. en/<name>.json — `{}`; translations arrive via `npm run i18n:import`.
- * 3. Register both below (import + CATALOGS + zhCN + en + EN_FILES).
+ * 2. en/<name>.json and zh-TW/<name>.json — `{}`; translations arrive via
+ *    `npm run i18n:import` (add `--locale zh-TW` for Traditional Chinese).
+ * 3. Register all three below (imports + CATALOGS + zhCN + en + EN_FILES +
+ *    zhTW + ZH_TW_FILES).
  * 4. In components: `const { t, tn } = useUiText()`; outside React render
  *    (notices, helpers): `uiText()` / `uiPlural()`. Never compare locales in
  *    components, never build sentences from fragments without a key.
@@ -89,6 +91,44 @@ import tapRegionsEn from "./en/tapRegions.json";
 import logEn from "./en/log.json";
 import cloudSyncEn from "./en/cloudSync.json";
 import aiEn from "./en/ai.json";
+import commonZhTW from "./zh-TW/common.json";
+import folderZhTW from "./zh-TW/folder.json";
+import languageZhTW from "./zh-TW/language.json";
+import readerZhTW from "./zh-TW/reader.json";
+import startupZhTW from "./zh-TW/startup.json";
+import titlebarZhTW from "./zh-TW/titlebar.json";
+import footerZhTW from "./zh-TW/footer.json";
+import sidebarZhTW from "./zh-TW/sidebar.json";
+import notesZhTW from "./zh-TW/notes.json";
+import imageViewerZhTW from "./zh-TW/imageViewer.json";
+import searchZhTW from "./zh-TW/search.json";
+import aaZhTW from "./zh-TW/aa.json";
+import fontsZhTW from "./zh-TW/fonts.json";
+import displayZhTW from "./zh-TW/display.json";
+import aboutZhTW from "./zh-TW/about.json";
+import cacheZhTW from "./zh-TW/cache.json";
+import libraryLocationZhTW from "./zh-TW/libraryLocation.json";
+import saveFileZhTW from "./zh-TW/saveFile.json";
+import bookExportZhTW from "./zh-TW/bookExport.json";
+import readestImportZhTW from "./zh-TW/readestImport.json";
+import koreaderImportZhTW from "./zh-TW/koreaderImport.json";
+import shareZhTW from "./zh-TW/share.json";
+import importProgressZhTW from "./zh-TW/importProgress.json";
+import lanZhTW from "./zh-TW/lan.json";
+import lanPanelZhTW from "./zh-TW/lanPanel.json";
+import folderImportZhTW from "./zh-TW/folderImport.json";
+import shelfZhTW from "./zh-TW/shelf.json";
+import shelfFolderZhTW from "./zh-TW/shelfFolder.json";
+import shelfMenuZhTW from "./zh-TW/shelfMenu.json";
+import shelfMainZhTW from "./zh-TW/shelfMain.json";
+import shelfSettingsZhTW from "./zh-TW/shelfSettings.json";
+import noticeZhTW from "./zh-TW/notice.json";
+import appUiZhTW from "./zh-TW/appUi.json";
+import readerMiscZhTW from "./zh-TW/readerMisc.json";
+import tapRegionsZhTW from "./zh-TW/tapRegions.json";
+import logZhTW from "./zh-TW/log.json";
+import cloudSyncZhTW from "./zh-TW/cloudSync.json";
+import aiZhTW from "./zh-TW/ai.json";
 
 declare const __APP_EDITION__: "core" | "ai";
 // Vite removes AI-only text from Core alongside the AI panel. Translation
@@ -223,4 +263,88 @@ export const EN_FILES: Readonly<Record<string, Readonly<Record<string, string>>>
   log: logEn,
   cloudSync: cloudSyncEn,
   ...(includeAi ? { ai: aiEn } : {}),
+};
+
+/** Traditional Chinese (Taiwan wording); missing or empty entries fall back to Simplified at runtime. */
+export const zhTW: Partial<Record<MessageKey, string>> = {
+  ...commonZhTW,
+  ...folderZhTW,
+  ...languageZhTW,
+  ...readerZhTW,
+  ...startupZhTW,
+  ...titlebarZhTW,
+  ...footerZhTW,
+  ...sidebarZhTW,
+  ...notesZhTW,
+  ...imageViewerZhTW,
+  ...searchZhTW,
+  ...aaZhTW,
+  ...fontsZhTW,
+  ...displayZhTW,
+  ...aboutZhTW,
+  ...cacheZhTW,
+  ...libraryLocationZhTW,
+  ...saveFileZhTW,
+  ...bookExportZhTW,
+  ...readestImportZhTW,
+  ...koreaderImportZhTW,
+  ...shareZhTW,
+  ...importProgressZhTW,
+  ...lanZhTW,
+  ...lanPanelZhTW,
+  ...folderImportZhTW,
+  ...shelfZhTW,
+  ...shelfFolderZhTW,
+  ...shelfMenuZhTW,
+  ...shelfMainZhTW,
+  ...shelfSettingsZhTW,
+  ...noticeZhTW,
+  ...appUiZhTW,
+  ...readerMiscZhTW,
+  ...tapRegionsZhTW,
+  ...logZhTW,
+  ...cloudSyncZhTW,
+  ...(includeAi ? aiZhTW : {}),
+};
+
+/** Namespace → Traditional Chinese file contents. */
+export const ZH_TW_FILES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  common: commonZhTW,
+  folder: folderZhTW,
+  language: languageZhTW,
+  reader: readerZhTW,
+  startup: startupZhTW,
+  titlebar: titlebarZhTW,
+  footer: footerZhTW,
+  sidebar: sidebarZhTW,
+  notes: notesZhTW,
+  imageViewer: imageViewerZhTW,
+  search: searchZhTW,
+  aa: aaZhTW,
+  fonts: fontsZhTW,
+  display: displayZhTW,
+  about: aboutZhTW,
+  cache: cacheZhTW,
+  libraryLocation: libraryLocationZhTW,
+  saveFile: saveFileZhTW,
+  bookExport: bookExportZhTW,
+  readestImport: readestImportZhTW,
+  koreaderImport: koreaderImportZhTW,
+  share: shareZhTW,
+  importProgress: importProgressZhTW,
+  lan: lanZhTW,
+  lanPanel: lanPanelZhTW,
+  folderImport: folderImportZhTW,
+  shelf: shelfZhTW,
+  shelfFolder: shelfFolderZhTW,
+  shelfMenu: shelfMenuZhTW,
+  shelfMain: shelfMainZhTW,
+  shelfSettings: shelfSettingsZhTW,
+  notice: noticeZhTW,
+  appUi: appUiZhTW,
+  readerMisc: readerMiscZhTW,
+  tapRegions: tapRegionsZhTW,
+  log: logZhTW,
+  cloudSync: cloudSyncZhTW,
+  ...(includeAi ? { ai: aiZhTW } : {}),
 };

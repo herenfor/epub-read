@@ -8,6 +8,7 @@ export function useUiLanguageChoice() {
   const [error, setError] = useState<string | null>(null);
   const options: Array<{ value: UiLanguagePreference; label: string }> = [
     { value: "zh-CN", label: t("language.zh-CN") },
+    { value: "zh-TW", label: t("language.zh-TW") },
     { value: "en", label: t("language.en") },
     { value: "system", label: t("language.system") },
   ];

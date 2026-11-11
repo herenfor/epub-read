@@ -1,6 +1,6 @@
-import { en, zhCN, type MessageKey } from "./catalog";
+import { en, zhCN, zhTW, type MessageKey } from "./catalog";
 
-export type UiLocale = "zh-CN" | "en";
+export type UiLocale = "zh-CN" | "zh-TW" | "en";
 export type UiLanguagePreference = UiLocale | "system";
 export const UI_LANGUAGE_STORAGE_KEY = "epub-reader:ui-language";
 
@@ -9,14 +9,23 @@ export const UI_LANGUAGE_STORAGE_KEY = "epub-reader:ui-language";
  * including "zh-CN", is the user's choice and is never replaced on start.
  */
 export function readUiLanguagePreference(value: unknown): UiLanguagePreference {
-  return value === "zh-CN" || value === "en" ? value : "system";
+  return value === "zh-CN" || value === "zh-TW" || value === "en" ? value : "system";
+}
+
+/** Traditional script: an explicit Hant tag, or a Taiwan / Hong Kong / Macau region without a Hans tag. */
+function isTraditionalChinese(tag: string): boolean {
+  const parts = tag.toLowerCase().split(/[-_]/);
+  if (parts.includes("hant")) return true;
+  if (parts.includes("hans")) return false;
+  return parts.some((part) => part === "tw" || part === "hk" || part === "mo");
 }
 
 /** The primary system language picks a supported locale; anything else falls back to English. */
 export function resolveUiLocale(preference: UiLanguagePreference, systemLanguages: readonly string[]): UiLocale {
   if (preference !== "system") return preference;
   const primary = systemLanguages.find((value) => value.trim().length > 0);
-  return primary?.toLowerCase().startsWith("zh") ? "zh-CN" : "en";
+  if (!primary?.toLowerCase().startsWith("zh")) return "en";
+  return isTraditionalChinese(primary) ? "zh-TW" : "zh-CN";
 }
 
 // Mirrors the runtime /\{(\w+)\}/ pattern: braces around non-identifiers (CSS examples) are literal text.
@@ -33,7 +42,7 @@ export type MessageArguments<K extends MessageKey> = [Placeholders<(typeof zhCN)
 
 /** Produces text, never HTML. React must render the result as a normal text child. */
 export function translate<K extends MessageKey>(locale: UiLocale, key: K, ...args: MessageArguments<K>): string {
-  const template = (locale === "en" ? en[key] : zhCN[key]) || zhCN[key];
+  const template = (locale === "en" ? en[key] : locale === "zh-TW" ? zhTW[key] : zhCN[key]) || zhCN[key];
   const values = args[0] as Record<string, string | number> | undefined;
   return template.replace(/\{(\w+)\}/g, (_match, name: string) => {
     const value = values?.[name];

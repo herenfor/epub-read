@@ -1,14 +1,34 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { CATALOGS, EN_FILES } from "../../src/ui/localization/catalog";
+import { CATALOGS, EN_FILES, ZH_TW_FILES } from "../../src/ui/localization/catalog";
 
 export const ROOT = join(import.meta.dirname, "../..");
 export const EN_DIR = join(ROOT, "src/ui/localization/en");
+
+/** Translated locales; "zh-CN" is the source and lives in catalogs/. */
+export type TargetLocale = "en" | "zh-TW";
+export const TARGETS: Record<TargetLocale, { dir: string; files: Readonly<Record<string, Readonly<Record<string, string>>>>; field: "en" | "zhTW"; name: string }> = {
+  en: { dir: EN_DIR, files: EN_FILES, field: "en", name: "English" },
+  "zh-TW": { dir: join(ROOT, "src/ui/localization/zh-TW"), files: ZH_TW_FILES, field: "zhTW", name: "Traditional Chinese" },
+};
+
+/** Reads `--locale <en|zh-TW>` (default en) and returns the remaining arguments. */
+export function takeLocale(args: string[]): { locale: TargetLocale; rest: string[] } {
+  const at = args.indexOf("--locale");
+  if (at < 0) return { locale: "en", rest: args };
+  const value = args[at + 1];
+  if (value !== "en" && value !== "zh-TW") {
+    console.error("--locale must be en or zh-TW");
+    process.exit(2);
+  }
+  return { locale: value, rest: [...args.slice(0, at), ...args.slice(at + 2)] };
+}
 
 export interface ExportEntry {
   key: string;
   zh: string;
   en: string;
+  zhTW: string;
   placeholders: string[];
   note?: string;
   max?: number;
@@ -58,6 +78,7 @@ export function exportEntries(): Array<{ namespace: string; entries: ExportEntry
       key,
       zh: meta.zh,
       en: EN_FILES[catalog.namespace][key] ?? "",
+      zhTW: ZH_TW_FILES[catalog.namespace][key] ?? "",
       placeholders: placeholdersOf(meta.zh),
       ...(meta.note ? { note: meta.note } : {}),
       ...(meta.max ? { max: meta.max } : {}),

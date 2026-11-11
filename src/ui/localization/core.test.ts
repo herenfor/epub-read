@@ -10,7 +10,13 @@ describe("UI language core", () => {
     expect(readUiLanguagePreference("en")).toBe("en");
     expect(resolveUiLocale("zh-CN", ["en-US"])).toBe("zh-CN");
     expect(resolveUiLocale("system", ["en-US", "zh-CN"])).toBe("en");
-    expect(resolveUiLocale("system", ["zh-TW", "en-US"])).toBe("zh-CN");
+    expect(readUiLanguagePreference("zh-TW")).toBe("zh-TW");
+    expect(resolveUiLocale("system", ["zh-TW", "en-US"])).toBe("zh-TW");
+    expect(resolveUiLocale("system", ["zh-Hant-CN"])).toBe("zh-TW");
+    expect(resolveUiLocale("system", ["zh-HK"])).toBe("zh-TW");
+    expect(resolveUiLocale("system", ["zh-Hans-HK"])).toBe("zh-CN");
+    expect(resolveUiLocale("system", ["zh-SG"])).toBe("zh-CN");
+    expect(resolveUiLocale("zh-TW", ["en-US"])).toBe("zh-TW");
     // Unsupported or unknown system languages fall back to English.
     expect(resolveUiLocale("system", ["fr-FR", "zh-CN"])).toBe("en");
     expect(resolveUiLocale("system", [])).toBe("en");
