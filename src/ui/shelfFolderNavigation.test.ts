@@ -164,4 +164,57 @@ describe("nested shelf navigation", () => {
       await shelf.dom.dispose();
     }
   });
+  it("在文件夹页内把书拖到另一本书上，会在当前文件夹里新建子文件夹", async () => {
+    const a2 = entry("a2", "系列直属二");
+    const org = organization();
+    const onApplyOrganization = vi.fn(async () => {});
+    const shelf = await render({ type: "folder", folderId: A }, {
+      entries: [a1, a2, b1, c1, loose],
+      organization: { ...org, books: { ...org.books, [a2.contentHash!]: { folderId: { value: A, stamp: stamp(14) } } } },
+      onApplyOrganization,
+    });
+    try {
+      const book = (id: string) => shelf.dom.container.querySelector(`[data-book-id="${id}"]`) as HTMLElement;
+      const win = shelf.dom.window as unknown as Window;
+      const pointer = (type: string): Event => {
+        const event = new (win as unknown as { Event: typeof Event }).Event(type, { bubbles: true, cancelable: true });
+        for (const [key, value] of Object.entries({ button: 0, isPrimary: true, pointerId: 1, pointerType: "touch", clientX: 100, clientY: 100 })) {
+          Object.defineProperty(event, key, { value });
+        }
+        return event;
+      };
+      const longPress = async () => {
+        await shelf.dom.run(() => { book("a1").dispatchEvent(pointer("pointerdown")); });
+        await shelf.dom.run(() => new Promise<void>((resolve) => setTimeout(resolve, 550)));
+      };
+      // 触摸：第一次长按进入多选，第二次长按才开始拖书。
+      await longPress();
+      await shelf.dom.run(() => { win.dispatchEvent(pointer("pointerup")); });
+      await longPress();
+      expect(shelf.dom.container.querySelector(".shelf-drag-ghost")).not.toBeNull();
+
+      Object.defineProperty(win.document, "elementFromPoint", { configurable: true, value: () => book("a2") });
+      await shelf.dom.run(() => { win.dispatchEvent(pointer("pointermove")); });
+      expect(book("a2").classList.contains("drag-over-book")).toBe(true);
+      await shelf.dom.run(() => { win.dispatchEvent(pointer("pointerup")); });
+
+      const dialog = shelf.dom.container.querySelector(".shelf-confirm form") as HTMLFormElement;
+      expect(dialog).not.toBeNull();
+      const input = dialog.querySelector("input") as HTMLInputElement;
+      // 测试 DOM 的 input 事件不驱动受控输入，直接调用 React 的 onChange。
+      await shelf.dom.run(() => {
+        const key = Object.keys(input).find((name) => name.startsWith("__reactProps$"))!;
+        (input as unknown as Record<string, { onChange(event: unknown): void }>)[key].onChange({ target: { value: "合集" } });
+      });
+      await shelf.dom.run(() => {
+        dialog.dispatchEvent(new (win as unknown as { Event: typeof Event }).Event("submit", { bubbles: true, cancelable: true }));
+      });
+      await shelf.dom.run(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+      const calls = onApplyOrganization.mock.calls.map((call) => (call as unknown[])[0] as { type: string; parentId?: string | null; contentHashes?: string[] });
+      expect(calls.find((call) => call.type === "createFolder")?.parentId).toBe(A);
+      expect(calls.find((call) => call.type === "moveBooks")?.contentHashes?.sort()).toEqual([a1.contentHash!, a2.contentHash!].sort());
+    } finally {
+      await shelf.dom.dispose();
+    }
+  });
 });

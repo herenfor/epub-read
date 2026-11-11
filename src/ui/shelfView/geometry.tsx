@@ -536,20 +536,23 @@ export const ShelfFolderTableRow = memo(function ShelfFolderTableRow(props: {
       </td>
       <td>
         <div className="shelf-table-title-cell">
-          <span className="shelf-table-title" style={{ fontWeight: 700 }} title={props.name}>
-            {props.name}
-          </span>
+          {/* 名称和首本同在一列，卷数相对两行整体垂直居中。 */}
+          <div className="shelf-table-folder-text">
+            <span className="shelf-table-title" style={{ fontWeight: 700 }} title={props.name}>
+              {props.name}
+            </span>
+            {first && (
+              <div className="shelf-table-folder-first" title={first.title}>
+                {t("shelfMain.table.folderFirst", { title: first.title })}
+              </div>
+            )}
+          </div>
           <span className="shelf-capsule-count">
             {(props.childCount ?? 0) > 0
               ? t("shelfFolder.card.meta", { books: props.books.length, folders: props.childCount ?? 0 })
               : tn("shelfMain.table.folderCount", props.books.length, { count: props.books.length })}
           </span>
         </div>
-        {first && (
-          <div className="shelf-table-folder-first" title={first.title}>
-            {t("shelfMain.table.folderFirst", { title: first.title })}
-          </div>
-        )}
       </td>
       {first ? (
         <>

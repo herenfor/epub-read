@@ -1539,6 +1539,11 @@
   width: 11px;
   height: 11px;
 }
+.shelf-table-folder-text {
+  flex: 1;
+  min-width: 0;
+}
+
 .shelf-table-folder-first {
   margin-top: 2px;
   max-width: 320px;
@@ -3824,16 +3829,17 @@
 }
 
 /* 逐级进出文件夹的页面动效：进入浮入，返回从下方回位。只动内容区，路径栏不动。 */
+/* 动画只向前填充：结束后不能留下层叠上下文，否则拖放目标升不到模糊层之上。 */
 .shelf-level-page {
   transform-origin: 50% 240px;
 }
 
 .shelf-level-page[data-level-nav="forward"] {
-  animation: page-arrive var(--page-in) var(--ease-emphasized) both;
+  animation: page-arrive var(--page-in) var(--ease-emphasized) backwards;
 }
 
 .shelf-level-page[data-level-nav="back"] {
-  animation: shelf-level-return var(--page-out) var(--ease-standard) both;
+  animation: shelf-level-return var(--page-out) var(--ease-standard) backwards;
 }
 
 @keyframes shelf-level-return {

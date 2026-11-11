@@ -1296,6 +1296,9 @@ export function ShelfView(props: ShelfViewProps) {
 
   const scopeRef = useRef(scope);
   scopeRef.current = scope;
+  // 拖书到书上新建文件夹时的落点：书架根，或当前打开的文件夹。
+  const mergeParentRef = useRef<{ parentId: string | null; blocked: boolean }>({ parentId: null, blocked: false });
+  mergeParentRef.current = { parentId: currentFolder?.id ?? null, blocked: currentFolderLevelFive };
 
   // 逐级进出文件夹：进入更深一层时新内容浮入，返回时从下方回到原位（page 动效，见 motionKinds.css）。
   const levelPageRef = useRef<HTMLDivElement>(null);
@@ -1563,12 +1566,12 @@ export function ShelfView(props: ShelfViewProps) {
         }
       } else if (targetType === "book") {
         const bookId = targetCard.dataset.bookId;
-        // 如果当前仍在文件夹弹窗内，或者在文件夹页面视图下，不允许书籍合并成新文件夹（单层限制）
-        const inFolderScope = scopeRef.current.type === "folder" || isDraggingFromFolderModalRef.current;
+        // 文件夹弹窗内不合并；文件夹页内合并成子文件夹，第五层已到上限时不合并。
+        const mergeBlocked = isDraggingFromFolderModalRef.current || mergeParentRef.current.blocked;
         if (
           bookId &&
           bookId !== draggedEntryRef.current?.id &&
-          !inFolderScope
+          !mergeBlocked
         ) {
           setDropTarget({ type: "book", id: bookId });
         } else {
@@ -1647,7 +1650,7 @@ export function ShelfView(props: ShelfViewProps) {
           const otherBook = entriesRef.current.find((b) => b.id === currentTarget.id);
           if (otherBook && otherBook.id !== currentDragged.id) {
             setPendingMergeIds([currentDragged.id, otherBook.id]);
-            setCreateFolderOpen({ parentId: null });
+            setCreateFolderOpen({ parentId: mergeParentRef.current.parentId });
           }
         }
       } else if (fromFolderId && !wasInsideModal) {
