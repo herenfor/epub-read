@@ -149,6 +149,20 @@
   display: none;
 }
 
+/* Pinning and unpinning an open drawer: the floating island and the docked
+   column are the same element, so its box glides between the two shapes
+   instead of jumping. Phones never dock. */
+.sidebar-drawer:not(.is-compact) {
+  transition:
+    top var(--ui-dock) var(--ease-emphasized),
+    bottom var(--ui-dock) var(--ease-emphasized),
+    left var(--ui-dock) var(--ease-emphasized),
+    right var(--ui-dock) var(--ease-emphasized),
+    width var(--ui-dock) var(--ease-emphasized),
+    border-radius var(--ui-dock) var(--ease-emphasized),
+    box-shadow var(--ui-dock) var(--ease-emphasized);
+}
+
 /* 抽屉顶部头部 */
 .sidebar-header {
   display: flex;
@@ -649,18 +663,21 @@
 }
 
 
-/* 驻留模式对正文容器的影响：正文版心自适应收缩 */
+/* 驻留模式对正文容器的影响：正文版心自适应收缩。过渡写在常驻规则上，
+   取消固定或关闭时正文同样滑回，而不是只有固定时才有动画。 */
+.app .main {
+  transition: margin var(--ui-dock) var(--ease-emphasized);
+}
+
 .app.has-docked-sidebar.docked-side-left .main,
 .app.has-docked-sidebar:not(.docked-side-right) .main {
   margin-left: 320px;
   margin-right: 0;
-  transition: margin var(--ui-dock) var(--ease-emphasized);
 }
 
 .app.has-docked-sidebar.docked-side-right .main {
   margin-right: 320px;
   margin-left: 0;
-  transition: margin var(--ui-dock) var(--ease-emphasized);
 }
 
 /* ---- 手机紧凑抽屉：覆盖层不占正文，安全区与 IME 由外层统一处理 ---- */

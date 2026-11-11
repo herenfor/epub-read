@@ -1539,9 +1539,16 @@
   width: 11px;
   height: 11px;
 }
-.shelf-table-folder-text {
+.shelf-table-folder-text,
+.shelf-table-title-text {
   flex: 1;
   min-width: 0;
+}
+
+/* Only the phone portrait list shows the author under the title; wider
+   lists have an author column. */
+.shelf-table-title-author {
+  display: none;
 }
 
 .shelf-table-folder-first {

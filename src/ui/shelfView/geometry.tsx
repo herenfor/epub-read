@@ -401,7 +401,11 @@ export const ShelfTableRow = memo(function ShelfTableRow({
       </td>
       <td>
         <div className="shelf-table-title-cell">
-          <span className="shelf-table-title" title={entry.title}>{entry.title}</span>
+          {/* 手机竖屏没有作者列，作者作为第二行跟在书名下。 */}
+          <div className="shelf-table-title-text">
+            <span className="shelf-table-title" title={entry.title}>{entry.title}</span>
+            <span className="shelf-table-title-author">{entry.creator || t("shelf.unknownAuthor")}</span>
+          </div>
           {entry.isNew && !selectionMode && (
             <span className="shelf-badge new" style={{ position: "static", marginLeft: 6 }}>
               {t("shelf.card.new")}

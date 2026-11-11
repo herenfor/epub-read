@@ -4937,7 +4937,7 @@ select option {
   min-width: 0;
 }
 
-/* 手机竖屏列表：在固定宽度内保留书名、进度和操作；装饰封面与次要列收起。 */
+/* 手机竖屏列表：在固定宽度内保留封面、书名（下带作者）、进度和操作；次要列收起。 */
 .app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table {
   table-layout: fixed;
   width: 100%;
@@ -4952,8 +4952,30 @@ select option {
   white-space: nowrap;
 }
 
-.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table th:nth-child(2),
-.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table td:nth-child(2) {
+/* 封面列：缩略图宽度加两侧 4px；表头不放文字，省出书名宽度。 */
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table .shelf-table-cover-col {
+  width: 40px;
+  font-size: 0;
+}
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-view.density-comfortable .shelf-table .shelf-table-cover-col {
+  width: 48px;
+}
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-view.density-compact .shelf-table .shelf-table-cover-col {
+  width: 34px;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table-title-author {
+  display: block;
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted, #6b7280);
+  font-size: var(--fs-caption);
+  line-height: 16px;
+}
+/* 紧凑密度的行高只有 36px，放不下两行。 */
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-view.density-compact .shelf-table-title-author {
   display: none;
 }
 
