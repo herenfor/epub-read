@@ -1,4 +1,5 @@
 import { createElement } from "react";
+import { menuCloseMs } from "./menuMotion";
 import { describe, expect, it, vi } from "vitest";
 import type { ShelfEntry } from "./shelf";
 import { emptyOrganization, type LibraryOrganization } from "./libraryOrganization";
@@ -442,11 +443,11 @@ describe("ShelfZen Packet 1 现代书架体验", () => {
       expect(cancelBtn).not.toBeNull();
       await dom.click(cancelBtn!);
 
-      // 验证触发 150ms 退场动效类 is-closing
+      // 验证触发退场动效类 is-closing
       expect(dom.container.querySelector(".shelf-floating-batch-dock.is-closing")).not.toBeNull();
 
-      // 150ms 动效结束后悬浮底坞自动移除
-      await new Promise((r) => setTimeout(r, 160));
+      // 退场时长跟随菜单关闭时长；动效结束后悬浮底坞自动移除
+      await dom.run(() => new Promise((r) => setTimeout(r, menuCloseMs() + 30)));
       expect(dom.container.querySelector(".shelf-floating-batch-dock")).toBeNull();
     } finally {
       await dom.dispose();
