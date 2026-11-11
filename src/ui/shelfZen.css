@@ -2058,31 +2058,6 @@
   flex: 1;
 }
 
-/* 手机根层：文件夹卡片的开关，和左边两个下拉同高，靠右。 */
-.shelf-folder-toggle-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-height: 48px;
-  height: 48px;
-  box-sizing: border-box;
-  margin-left: auto;
-  padding: 0 10px;
-  border-radius: var(--r-md);
-  border: 1px solid color-mix(in srgb, var(--accent, #2563eb) 24%, var(--shelf-card-border, rgba(0, 0, 0, 0.1)));
-  background: color-mix(in srgb, var(--accent, #2563eb) 6%, transparent);
-  color: var(--accent, #2563eb);
-  font-size: var(--fs-body);
-  font-weight: 600;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-/* 展开的文件夹卡片和下面的书隔开，不连成一片。 */
-.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-folder-prefix {
-  margin-bottom: 18px;
-}
-
 /* 文件夹激活状态栏移动端适配 */
 .app[data-mobile-chrome="true"][data-layout="compact"] .shelf-folder-active-bar {
   display: flex;

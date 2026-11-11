@@ -68,6 +68,8 @@ export const shelfFolder = defineMessages("shelfFolder", {
   "shelfFolder.addBooks.confirm.one": { zh: "添加 {count} 本", note: "Singular form.", max: 14 },
   "shelfFolder.moveFolder": { zh: "移动到…", note: "Folder menu: move the whole folder under another folder.", max: 12 },
   "shelfFolder.card.meta": "共 {books} 本 · {folders} 个子文件夹",
+  "shelfFolder.card.subfolders.other": { zh: "{count} 个子文件夹", note: "Second line on a folder card.", max: 16 },
+  "shelfFolder.card.subfolders.one": { zh: "{count} 个子文件夹", note: "Singular form.", max: 16 },
   "shelfFolder.move.folderTitle": "移动文件夹「{name}」",
   "shelfFolder.move.folderHint": "它下面还有 {count} 层子文件夹，会一起移动；书的归属不变。",
   "shelfFolder.move.bookHint": "一本书只放在一个文件夹里；未归类表示放回书架根目录。",

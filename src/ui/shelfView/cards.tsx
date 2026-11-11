@@ -392,7 +392,7 @@ export const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
 });
 
 /* =========================================================================
- * 文件夹卡片组件（4图马赛克拼图、弹层菜单、触控安全区）
+ * 文件夹卡片组件（叠层外形 + 固定四格封面、弹层菜单、触控安全区）
  * ========================================================================= */
 
 interface ShelfFolderCardProps {
@@ -411,6 +411,8 @@ interface ShelfFolderCardProps {
   onOpen(id: string, element?: HTMLElement | null): void;
   onRequestMenu?(target: ShelfMenuTarget, opener: ShelfMenuOpener): void;
 }
+
+const FOLDER_MOSAIC_SLOTS = [0, 1, 2, 3] as const;
 
 export const ShelfFolderCard = memo(function ShelfFolderCard(props: ShelfFolderCardProps) {
   const { t, tn } = useUiText();
@@ -437,7 +439,7 @@ export const ShelfFolderCard = memo(function ShelfFolderCard(props: ShelfFolderC
     else if (selectable) props.onToggleSelected?.(props.id);
   };
 
-  const sampleBooks = props.books.slice(0, 9);
+  const sampleBooks = props.books.slice(0, FOLDER_MOSAIC_SLOTS.length);
   const checked = props.selectionState === "all";
   const mixed = props.selectionState === "mixed";
 
@@ -490,19 +492,21 @@ export const ShelfFolderCard = memo(function ShelfFolderCard(props: ShelfFolderC
             </div>
           </div>
         )}
-        {sampleBooks.length === 0 ? (
-          <div className="shelf-folder-empty-cover" aria-hidden="true">
-            <FolderIcon />
+        {/* 叠层外形：上沿露出两层纸边，封面固定四格；样子不随里面有几本变化。 */}
+        <span className="shelf-folder-sheet shelf-folder-sheet-back" aria-hidden="true" />
+        <span className="shelf-folder-sheet" aria-hidden="true" />
+        <div className="shelf-folder-face">
+          <div className="shelf-folder-mosaic">
+            {FOLDER_MOSAIC_SLOTS.map((slot) => {
+              const book = sampleBooks[slot];
+              return (
+                <div key={book?.id ?? `empty-${slot}`} className={`shelf-folder-mosaic-cell${book ? "" : " is-empty"}`}>
+                  {book && <Cover entry={book} provider={props.provider} />}
+                </div>
+              );
+            })}
           </div>
-        ) : (
-          <div className={`shelf-folder-mosaic ${sampleBooks.length === 1 ? "shelf-folder-mosaic-1" : sampleBooks.length <= 4 ? "shelf-folder-mosaic-2x2" : "shelf-folder-mosaic-3x3"}`}>
-            {sampleBooks.map((b) => (
-              <div key={b.id} className="shelf-folder-mosaic-cell">
-                <Cover entry={b} provider={props.provider} />
-              </div>
-            ))}
-          </div>
-        )}
+        </div>
 
         {!props.selectionMode && props.onRequestMenu && (
           <div className="shelf-card-actions-wrap">
@@ -527,12 +531,16 @@ export const ShelfFolderCard = memo(function ShelfFolderCard(props: ShelfFolderC
       </div>
 
       <div className="shelf-card-info">
-        <div className="shelf-card-title">{props.name}</div>
+        <div className="shelf-card-title"><FolderIcon />{props.name}</div>
         <div className="shelf-card-meta">
+          {/* 和书卡片一样两行：第一行本数，第二行子文件夹数；没有子文件夹也留着这一行，保证整行等高。 */}
           <span className="shelf-card-creator">
+            {tn("shelfFolder.bookCount", props.books.length, { count: props.books.length })}
+          </span>
+          <span className="shelf-card-subline">
             {(props.childCount ?? 0) > 0
-              ? t("shelfFolder.card.meta", { books: props.books.length, folders: props.childCount ?? 0 })
-              : tn("shelfFolder.bookCount", props.books.length, { count: props.books.length })}
+              ? tn("shelfFolder.card.subfolders", props.childCount ?? 0, { count: props.childCount ?? 0 })
+              : "\u00a0"}
           </span>
         </div>
       </div>

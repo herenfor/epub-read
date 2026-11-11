@@ -65,6 +65,8 @@
   "shelfFolder.addBooks.confirm.one": "Add {count} Book",
   "shelfFolder.moveFolder": "Move to…",
   "shelfFolder.card.meta": "{books} books · {folders} subfolders",
+  "shelfFolder.card.subfolders.other": "{count} subfolders",
+  "shelfFolder.card.subfolders.one": "{count} subfolder",
   "shelfFolder.move.folderTitle": "Move folder \"{name}\"",
   "shelfFolder.move.folderHint": "Its {count} levels of subfolders move with it; book placement is unchanged.",
   "shelfFolder.move.bookHint": "A book belongs to one folder; unclassified means the library root.",

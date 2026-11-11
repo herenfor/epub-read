@@ -3986,52 +3986,87 @@ select option {
   cursor: pointer;
 }
 
+/* 叠层外形：外框只占位（和书封同比例），正面是 .shelf-folder-face，上沿露出两层纸边。 */
 .shelf-folder-cover-box {
   position: relative;
   width: 100%;
   aspect-ratio: 128 / 188;
+  /* 通用书封的底色、边框、阴影和裁切都交给正面，外框本身不画。 */
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  overflow: visible;
+  box-shadow: none !important;
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  will-change: transform;
+}
+
+@media (hover: hover) {
+  :where(.shelf-view:not([data-input="touch"])) .shelf-folder-card:hover .shelf-folder-face {
+    box-shadow: var(--shelf-card-hover-shadow);
+    border-color: color-mix(in srgb, var(--accent) 32%, var(--shelf-card-border));
+  }
+}
+
+.shelf-folder-card:focus-visible .shelf-folder-face {
+  box-shadow: var(--shelf-card-hover-shadow);
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--shelf-card-border));
+}
+
+.shelf-folder-card.selected .shelf-folder-cover-box {
+  outline: none;
+}
+
+.shelf-folder-card.selected .shelf-folder-face {
+  outline: 2.5px solid var(--accent);
+  outline-offset: -2.5px;
+  background: color-mix(in srgb, var(--shelf-card-bg) 82%, var(--accent) 14%);
+}
+
+.shelf-folder-sheet {
+  position: absolute;
+  left: 5%;
+  right: 5%;
+  top: 3%;
+  height: 10%;
+  box-sizing: border-box;
+  border: 1.5px solid var(--shelf-card-border);
+  border-bottom: 0;
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+  background: color-mix(in srgb, var(--shelf-card-bg) 86%, var(--fg) 10%);
+}
+
+.shelf-folder-sheet-back {
+  left: 11%;
+  right: 11%;
+  top: 0;
+  background: color-mix(in srgb, var(--shelf-card-bg) 92%, var(--fg) 6%);
+}
+
+.shelf-folder-face {
+  position: absolute;
+  inset: 6% 0 0;
+  box-sizing: border-box;
+  padding: 8px 14%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
   background: color-mix(in srgb, var(--shelf-card-bg) 88%, var(--accent) 6%);
   border: 1.5px solid var(--shelf-card-border);
   border-radius: var(--r-lg);
-  overflow: hidden;
   box-shadow: var(--shelf-card-shadow);
-  padding: 8px 6px;
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1),
-              box-shadow 0.25s cubic-bezier(0.34, 1.56, 0.64, 1),
+  transition: box-shadow 0.25s cubic-bezier(0.34, 1.56, 0.64, 1),
               border-color 0.2s ease,
               background 0.2s ease;
-  will-change: transform, box-shadow;
-}
-
-.shelf-folder-empty-cover {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--muted);
-  opacity: 0.6;
-}
-
-.shelf-folder-empty-cover .shelf-svg-icon {
-  width: 48px;
-  height: 48px;
 }
 
 .shelf-folder-mosaic {
   width: 100%;
-  height: 100%;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  grid-template-rows: repeat(3, 1fr);
-  gap: 5px 4px;
-  align-items: stretch;
-  justify-items: stretch;
-  background: transparent;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+  align-content: center;
 }
 
 .shelf-folder-mosaic-cell {
@@ -4045,11 +4080,32 @@ select option {
   transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
+/* 没书的格子留浅色空位，文件夹的样子不随本数变。 */
+.shelf-folder-mosaic-cell.is-empty {
+  background: color-mix(in srgb, var(--shelf-card-bg) 84%, var(--fg) 10%);
+  box-shadow: none;
+}
+
 .shelf-folder-mosaic-cell .shelf-cover {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+/* 勾选框和「更多」按钮落在正面上，不压在露出的纸边上。 */
+.shelf-folder-cover-box > .shelf-card-checkbox,
+.shelf-folder-cover-box > .shelf-card-actions-wrap {
+  margin-top: 8%;
+}
+
+.shelf-folder-card .shelf-card-title > .shelf-svg-icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-right: 4px;
+  vertical-align: -0.12em;
+  color: var(--muted);
 }
 
 /* 单卡片星标按钮 */
@@ -4483,6 +4539,9 @@ select option {
 
 .shelf-folder-card.is-drop-target .shelf-folder-cover-box {
   transform: scale(1.09);
+}
+
+.shelf-folder-card.is-drop-target .shelf-folder-face {
   border-radius: var(--r-xl);
   border-color: var(--accent);
   box-shadow:
@@ -5576,19 +5635,7 @@ select option {
   z-index: calc(var(--z-ui-modal) + 1);
 }
 
-/* ---- C1：文件夹前缀与书籍虚拟占位所有权分离 ---- */
-.shelf-folder-prefix {
-  margin-bottom: 22px;
-}
-
-.shelf-view.density-comfortable .shelf-folder-prefix {
-  margin-bottom: 28px;
-}
-
-.shelf-view.density-compact .shelf-folder-prefix {
-  margin-bottom: 14px;
-}
-
+/* ---- 网格里文件夹和书同在一个虚拟占位容器 ---- */
 .shelf-book-prefix {
   position: relative;
 }
@@ -6294,31 +6341,6 @@ select option {
   padding: 8px 10px;
   justify-content: flex-start;
   border-style: solid;
-}
-
-/* ER-0170 整改：文件夹卡片的封面拼图按本数换格数，书少时不再缩在一角。 */
-.shelf-folder-mosaic.shelf-folder-mosaic-2x2 {
-  grid-template-columns: repeat(2, 1fr);
-  grid-template-rows: repeat(2, 1fr);
-  gap: 6px;
-}
-
-.shelf-folder-mosaic.shelf-folder-mosaic-1 {
-  grid-template-columns: 1fr;
-  grid-template-rows: 1fr;
-  padding: 6px 10px;
-  box-sizing: border-box;
-}
-
-.shelf-folder-mosaic.shelf-folder-mosaic-2x2 {
-  grid-template-rows: none;
-  grid-auto-rows: auto;
-  align-content: center;
-}
-
-.shelf-folder-mosaic.shelf-folder-mosaic-1 .shelf-folder-mosaic-cell {
-  aspect-ratio: auto;
-  height: 100%;
 }
 
 /* ER-0170 整改：移动目标弹窗的间距与底部按钮。 */

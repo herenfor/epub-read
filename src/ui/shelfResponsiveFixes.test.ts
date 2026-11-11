@@ -313,18 +313,11 @@ describe("第三步补修：书架触摸长按与子菜单 Back", () => {
       expect(menuItems[2]).toContain("名著");
       await dom.click(folderBtn);
 
-      // 根层默认展开文件夹卡片；开关在筛选行，不再单占一行；收起后开关仍在，可再展开
-      expect(dom.container.querySelector(".shelf-folder-summary-rail")).toBeNull();
-      const toggle = dom.container.querySelector(".shelf-nav-rail-left .shelf-folder-toggle-btn") as HTMLButtonElement;
-      expect(toggle.getAttribute("aria-expanded")).toBe("true");
-      expect(toggle.textContent).toContain("文件夹 (1)");
-      expect(dom.container.querySelector(".shelf-folder-card")).not.toBeNull();
-      await dom.click(toggle);
-      expect(dom.container.querySelector(".shelf-folder-card")).toBeNull();
-      expect(dom.container.querySelector(".shelf-folder-prefix")).toBeNull();
-      expect(toggle.getAttribute("aria-expanded")).toBe("false");
-      await dom.click(toggle);
-      expect(dom.container.querySelector(".shelf-folder-card")).not.toBeNull();
+      // 文件夹卡片和书在同一个网格里，文件夹在前；手机上不再有收起文件夹的开关
+      expect(dom.container.querySelector(".shelf-folder-toggle-btn")).toBeNull();
+      const gridCards = [...dom.container.querySelectorAll(".shelf-book-grid > .shelf-card")];
+      expect(gridCards[0]?.classList.contains("shelf-folder-card")).toBe(true);
+      expect(gridCards.some((card) => card.hasAttribute("data-book-id"))).toBe(true);
 
       // 4. 外部右轨移除
       expect(dom.container.querySelector(".shelf-nav-rail-right")).toBeNull();
@@ -344,44 +337,6 @@ describe("第三步补修：书架触摸长按与子菜单 Back", () => {
       expect(settings?.textContent).not.toContain("批量选择");
     } finally {
       await dom.dispose();
-    }
-  });
-
-  it("文件夹收起或展开后，离开再重建书架仍保留选择", async () => {
-    const store = new Map<string, string>();
-    vi.stubGlobal("localStorage", {
-      getItem: (key: string) => store.get(key) ?? null,
-      setItem: (key: string, value: string) => { store.set(key, value); },
-      removeItem: (key: string) => { store.delete(key); },
-    });
-    const dom = createReactDomHarness();
-    const shelf = () => createElement(ShelfView, {
-      ...makeProps([makeEntry("b1", "爱丽丝漫游仙境")]),
-      compact: true,
-      organization: {
-        ...emptyOrganization(),
-        folders: { f1: { name: { value: "名著", stamp: { counter: 1, deviceId: "test" } } } },
-      },
-    });
-    const toggle = () => dom.container.querySelector(".shelf-folder-toggle-btn") as HTMLButtonElement;
-    try {
-      await dom.render(shelf());
-      expect(toggle().getAttribute("aria-expanded")).toBe("true");
-      await dom.click(toggle());
-      // Opening a book unmounts ShelfView; returning creates a new instance.
-      await dom.render(null);
-      await dom.render(shelf());
-      expect(toggle().getAttribute("aria-expanded")).toBe("false");
-      expect(dom.container.querySelector(".shelf-folder-card")).toBeNull();
-
-      await dom.click(toggle());
-      await dom.render(null);
-      await dom.render(shelf());
-      expect(toggle().getAttribute("aria-expanded")).toBe("true");
-      expect(dom.container.querySelector(".shelf-folder-card")).not.toBeNull();
-    } finally {
-      await dom.dispose();
-      vi.unstubAllGlobals();
     }
   });
 

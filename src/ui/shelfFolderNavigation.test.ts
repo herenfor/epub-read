@@ -74,7 +74,9 @@ describe("nested shelf navigation", () => {
     const shelf = await render();
     try {
       const aCard = shelf.card(A)!;
-      expect(aCard.querySelector(".shelf-card-creator")?.textContent).toBe("共 3 本 · 1 个子文件夹");
+      // 卡片两行：本数含子孙，子文件夹数单独一行。
+      expect(aCard.querySelector(".shelf-card-creator")?.textContent).toBe("3 本书");
+      expect(aCard.querySelector(".shelf-card-subline")?.textContent).toBe("1 个子文件夹");
       expect(shelf.dom.container.querySelector(`[data-book-id="${b1.id}"]`)).toBeNull();
 
       await shelf.dom.click(aCard);

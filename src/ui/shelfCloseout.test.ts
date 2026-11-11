@@ -54,7 +54,7 @@ afterEach(() => {
 });
 
 describe("书架最后收口：前缀所有权与缩放后字母定位", () => {
-  it("文件夹前缀与书籍 grid 分离，虚拟占位只属于书籍窗口", async () => {
+  it("文件夹卡片与书同在一个 grid，文件夹在前", async () => {
     const dom = createReactDomHarness();
     const baseOrganization = emptyOrganization();
     const organization = {
@@ -68,12 +68,11 @@ describe("书架最后收口：前缀所有权与缩放后字母定位", () => {
     } as LibraryOrganization;
     try {
       await dom.render(createElement(ShelfView, makeProps([makeEntry("b1", "第一本")], organization)));
-      const folderPrefix = dom.container.querySelector(".shelf-folder-prefix .shelf-folder-grid");
       const bookPrefix = dom.container.querySelector(".shelf-book-prefix .shelf-book-grid");
-      expect(folderPrefix).not.toBeNull();
+      expect(dom.container.querySelector(".shelf-folder-prefix")).toBeNull();
       expect(bookPrefix).not.toBeNull();
-      expect(folderPrefix?.querySelector(".shelf-folder-card")).not.toBeNull();
-      expect(folderPrefix?.querySelector(".shelf-card[data-book-id]")).toBeNull();
+      // 文件夹卡片在同一个网格里，排在书前面。
+      expect(bookPrefix?.firstElementChild?.classList.contains("shelf-folder-card")).toBe(true);
       expect(bookPrefix?.querySelector(".shelf-card[data-book-id]")).not.toBeNull();
     } finally {
       await dom.dispose();

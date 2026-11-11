@@ -75,7 +75,6 @@ import {
   CheckListIcon,
   CheckSquareIcon,
   ChevronDownIcon,
-  ChevronUpIcon,
   CloseIcon,
   DotsVerticalIcon,
   EditIcon,
@@ -356,7 +355,6 @@ const SETTINGS_WARM_BATCHES: readonly PanelWarmBatch[] = [["shelf-settings"], ["
 
 const SHELF_SORTS: readonly ShelfSort[] = ["recent", "added", "title", "progress"];
 const FOLDER_SORT_STORAGE_KEY = "epub_shelf_folder_sort";
-const FOLDER_PREFIX_EXPANDED_STORAGE_KEY = "epub_shelf_folders_expanded";
 const FOLDER_TREE_EXPANDED_STORAGE_KEY = "epub_shelf_folder_tree_expanded";
 
 export function ShelfView(props: ShelfViewProps) {
@@ -530,21 +528,6 @@ export function ShelfView(props: ShelfViewProps) {
     : t("shelfMain.empty.hint.desktop");
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const categoryDropdownRef = useRef<HTMLDivElement | null>(null);
-  // 默认展开；沿用本机选择，避免开书后返回时因书架重建而重置。
-  const [folderPrefixExpanded, setFolderPrefixExpanded] = useState(() => {
-    try {
-      return localStorage.getItem(FOLDER_PREFIX_EXPANDED_STORAGE_KEY) !== "false";
-    } catch {
-      return true;
-    }
-  });
-  const toggleFolderPrefix = () => {
-    const next = !folderPrefixExpanded;
-    setFolderPrefixExpanded(next);
-    try {
-      localStorage.setItem(FOLDER_PREFIX_EXPANDED_STORAGE_KEY, String(next));
-    } catch {}
-  };
 
   const [folderActiveMoreOpen, setFolderActiveMoreOpen] = useState(false);
   const folderActiveMoreRef = useRef<HTMLDivElement | null>(null);
@@ -1055,9 +1038,8 @@ export function ShelfView(props: ShelfViewProps) {
     return sortShelfFolders(matched, folderSubtreeBooksMap, sort);
   }, [scope, statusTab, folderIndex, query, folderSubtreeBooksMap, sort]);
 
-  // 手机上只有根层允许收起文件夹卡片；文件夹页里的子文件夹卡片始终显示。
-  const folderCardsVisible = (scope.type === "root" || scope.type === "folder")
-    && (!isCompactMobile || viewMode !== "grid" || scope.type === "folder" || folderPrefixExpanded);
+  // 网格视图里文件夹和书排在同一个网格：文件夹在前，书紧跟其后；列表视图的文件夹行仍在书行之前。
+  const gridFolderCount = viewMode === "grid" ? visibleFolders.length : 0;
 
   // 下拉树按当前路径默认展开；用户在本机收起后保持，不写入同步存档。
   const folderTreeRows = useMemo(() => {
@@ -1111,19 +1093,25 @@ export function ShelfView(props: ShelfViewProps) {
 
   const virtualizer = useShelfVirtualizer(
     shelfViewRef,
-    visible.length,
+    // 网格的虚拟窗口按「文件夹 + 书」一起算行；列表只算书行，文件夹行在起点之前。
+    gridFolderCount + visible.length,
     viewMode,
     density,
-    // 收起的文件夹卡片不占位：按实际画出的张数重测书籍区起点。
-    folderCardsVisible ? visibleFolders.length : 0,
+    viewMode === "grid" ? 0 : visibleFolders.length,
     40,
     `${scope.type === "folder" ? scope.folderId : "root"}|${statusTab}|${query}`
   );
 
+  const renderedFolders = useMemo(() => {
+    if (gridFolderCount === 0) return [];
+    if (!virtualizer.isVirtual) return visibleFolders;
+    return visibleFolders.slice(Math.min(gridFolderCount, virtualizer.startIndex), Math.min(gridFolderCount, virtualizer.endIndex));
+  }, [gridFolderCount, visibleFolders, virtualizer]);
+
   const renderedBooks = useMemo(() => {
     if (!virtualizer.isVirtual) return visible;
-    return visible.slice(virtualizer.startIndex, virtualizer.endIndex);
-  }, [visible, virtualizer]);
+    return visible.slice(Math.max(0, virtualizer.startIndex - gridFolderCount), Math.max(0, virtualizer.endIndex - gridFolderCount));
+  }, [gridFolderCount, visible, virtualizer]);
 
   const letterFirstIndexMap = useMemo(() => {
     if (sort !== "title") return new Map<string, number>();
@@ -1168,10 +1156,10 @@ export function ShelfView(props: ShelfViewProps) {
         return;
       }
       scrollShelfToOffset(
-        geometry.contentTop + Math.floor(targetIndex / geometry.columns) * geometry.rowStep
+        geometry.contentTop + Math.floor((targetIndex + gridFolderCount) / geometry.columns) * geometry.rowStep
       );
     },
-    [scrollShelfToOffset, virtualizer.gridGeometry, visible]
+    [gridFolderCount, scrollShelfToOffset, virtualizer.gridGeometry, visible]
   );
 
   useEffect(() => {
@@ -1184,9 +1172,9 @@ export function ShelfView(props: ShelfViewProps) {
     if (targetIndex < 0) return;
     const geometry = virtualizer.gridGeometry;
     scrollShelfToOffset(
-      geometry.contentTop + Math.floor(targetIndex / geometry.columns) * geometry.rowStep
+      geometry.contentTop + Math.floor((targetIndex + gridFolderCount) / geometry.columns) * geometry.rowStep
     );
-  }, [scrollShelfToOffset, viewMode, virtualizer.gridGeometry, visible]);
+  }, [gridFolderCount, scrollShelfToOffset, viewMode, virtualizer.gridGeometry, visible]);
 
   const thumbnailProvider = props.thumbnailProvider ?? legacyThumbnailProvider;
 
@@ -2695,20 +2683,6 @@ export function ShelfView(props: ShelfViewProps) {
             )}
           </div>
 
-          {/* 手机根层网格：文件夹卡片的展开/收起放在筛选行最右，不再单占一行。 */}
-          {isCompactMobile && scope.type === "root" && viewMode === "grid" && visibleFolders.length > 0 && (
-            <button
-              className={`shelf-folder-toggle-btn${folderPrefixExpanded ? " expanded" : ""}`}
-              type="button"
-              onClick={toggleFolderPrefix}
-              aria-expanded={folderPrefixExpanded}
-              title={t(folderPrefixExpanded ? "shelfMain.folders.collapse.tip" : "shelfMain.folders.expand.tip")}
-              aria-label={t(folderPrefixExpanded ? "shelfMain.folders.collapse.tip" : "shelfMain.folders.expand.tip")}
-            >
-              <span>{t("shelfMain.folders.summary", { count: visibleFolders.length })}</span>
-              {folderPrefixExpanded ? <ChevronUpIcon /> : <ChevronDownIcon />}
-            </button>
-          )}
 
         </div>
 
@@ -3126,30 +3100,7 @@ export function ShelfView(props: ShelfViewProps) {
           </table>
         </ShelfTableScroller>
       ) : (
-        <div className="shelf-level-page" ref={levelPageRef}>
-          {(scope.type === "root" || scope.type === "folder") && visibleFolders.length > 0 && folderCardsVisible && (
-            <div className="shelf-folder-prefix">
-              <div className="shelf-grid shelf-folder-grid">
-                {visibleFolders.map((folder) => (
-                  <ShelfFolderCard
-                    key={folder.id}
-                    id={folder.id}
-                    name={folder.name}
-                    books={folderSubtreeBooksMap.get(folder.id) ?? []}
-                    childCount={folderIndex.childrenByParent.get(folder.id)?.length ?? 0}
-                    provider={thumbnailProvider}
-                    selectionMode={selectionMode}
-                    selectionState={selectionMode ? folderSelectionState(folderSubtreeBooksMap.get(folder.id) ?? [], selectedIds) : undefined}
-                    onToggleSelected={toggleFolderSelected}
-                    isDropTarget={(dropTarget?.type === "folder" && dropTarget.id === folder.id) || props.externalDropFolderId === folder.id}
-                    menuOpen={openMenuKey === `folder:${folder.id}`}
-                    onOpen={handleOpenFolderModal}
-                    onRequestMenu={canOrganize ? requestMenu : undefined}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
+        <div key="level-page" className="shelf-level-page" ref={levelPageRef}>
           <div
             className="shelf-book-prefix"
             style={{
@@ -3158,6 +3109,23 @@ export function ShelfView(props: ShelfViewProps) {
             }}
           >
             <div className="shelf-grid shelf-book-grid">
+              {renderedFolders.map((folder) => (
+                <ShelfFolderCard
+                  key={folder.id}
+                  id={folder.id}
+                  name={folder.name}
+                  books={folderSubtreeBooksMap.get(folder.id) ?? []}
+                  childCount={folderIndex.childrenByParent.get(folder.id)?.length ?? 0}
+                  provider={thumbnailProvider}
+                  selectionMode={selectionMode}
+                  selectionState={selectionMode ? folderSelectionState(folderSubtreeBooksMap.get(folder.id) ?? [], selectedIds) : undefined}
+                  onToggleSelected={toggleFolderSelected}
+                  isDropTarget={(dropTarget?.type === "folder" && dropTarget.id === folder.id) || props.externalDropFolderId === folder.id}
+                  menuOpen={openMenuKey === `folder:${folder.id}`}
+                  onOpen={handleOpenFolderModal}
+                  onRequestMenu={canOrganize ? requestMenu : undefined}
+                />
+              ))}
               {renderedBooks.map((entry) => (
                 <ShelfCard
                   key={entry.id}
