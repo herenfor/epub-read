@@ -18,7 +18,7 @@
   "shelfFolder.saving": "Saving...",
   "shelfFolder.confirm": "Confirm",
   "shelfFolder.dissolve.title": "Dissolve folder \"{name}\"?",
-  "shelfFolder.dissolve.hint": "Books will return to Unclassified. Favorites, progress, and notes are preserved.",
+  "shelfFolder.dissolve.hint": "Its books and subfolders move up one level. Favorites, progress, and notes are preserved.",
   "shelfFolder.dissolving": "Dissolving…",
   "shelfFolder.move.oneBook": "\"{title}\"",
   "shelfFolder.move.books.other": "{count} books",

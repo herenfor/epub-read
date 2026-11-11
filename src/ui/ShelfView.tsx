@@ -1314,11 +1314,32 @@ export function ShelfView(props: ShelfViewProps) {
   const levelDepth = scope.type === "folder" ? currentFolderPath.length : scope.type === "root" ? 0 : -1;
   const levelKey = scope.type === "folder" ? scope.folderId : scope.type;
   const lastLevelRef = useRef({ key: levelKey, depth: levelDepth });
+  // 每一层记住自己的滚动位置：进入更深一层从顶部开始，返回时回到离开前的位置（只在本次会话内）。
+  const levelScrollRef = useRef(new Map<string, number>());
+  const liveScrollTopRef = useRef(0);
+  useEffect(() => {
+    const scroller = shelfViewRef.current;
+    if (!scroller) return;
+    const onScroll = (): void => { liveScrollTopRef.current = scroller.scrollTop; };
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    return () => scroller.removeEventListener("scroll", onScroll);
+  }, []);
   useLayoutEffect(() => {
     const last = lastLevelRef.current;
     lastLevelRef.current = { key: levelKey, depth: levelDepth };
+    if (last.key === levelKey || last.depth < 0 || levelDepth < 0) return;
+    const scroller = shelfViewRef.current;
+    if (scroller) {
+      // 滚动事件是异步派发的：此刻 liveScrollTopRef 仍是上一层的位置，尚未被新内容的高度夹紧。
+      levelScrollRef.current.set(last.key, liveScrollTopRef.current);
+      const back = levelDepth < last.depth;
+      const top = back ? (levelScrollRef.current.get(levelKey) ?? 0) : 0;
+      if (!back) levelScrollRef.current.delete(levelKey);
+      scroller.scrollTop = top;
+      liveScrollTopRef.current = top;
+    }
     const el = levelPageRef.current;
-    if (!el || last.key === levelKey || last.depth < 0 || levelDepth < 0) return;
+    if (!el) return;
     el.removeAttribute("data-level-nav");
     void el.offsetWidth;
     el.setAttribute("data-level-nav", levelDepth < last.depth ? "back" : "forward");
@@ -3189,7 +3210,8 @@ export function ShelfView(props: ShelfViewProps) {
         <ShelfRenameDialog
           folderId={renameFolderTarget.id}
           currentName={renameFolderTarget.name}
-          existingNames={activeFolders.map((f) => f.name)}
+          existingNames={(folderIndex.childrenByParent.get(folderIndex.byId.get(renameFolderTarget.id)?.parentId ?? null) ?? [])
+            .map((folder) => folder.name)}
           busy={props.busy}
           onCancel={() => setRenameFolderTarget(null)}
           onRename={handleRenameFolder}

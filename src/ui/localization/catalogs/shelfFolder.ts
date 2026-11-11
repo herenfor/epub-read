@@ -21,7 +21,7 @@ export const shelfFolder = defineMessages("shelfFolder", {
   "shelfFolder.saving": { zh: "保存中…", max: 10 },
   "shelfFolder.confirm": { zh: "确定", max: 10 },
   "shelfFolder.dissolve.title": { zh: "解散文件夹“{name}”？", note: "Confirmation title; quote marks around the folder name." },
-  "shelfFolder.dissolve.hint": "书籍将回到未归类，收藏、进度和笔记保留。",
+  "shelfFolder.dissolve.hint": "里面的书和子文件夹会移到上一级，收藏、进度和笔记保留。",
   "shelfFolder.dissolving": { zh: "解散中…", max: 12 },
   "shelfFolder.move.oneBook": { zh: "《{title}》", note: "A single book title in the move dialog title; use your language's title convention." },
   "shelfFolder.move.books.other": "{count} 本书",

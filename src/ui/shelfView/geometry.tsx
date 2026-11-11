@@ -170,7 +170,9 @@ export function useShelfVirtualizer(
         frame = null;
         // Observe current nodes, including the prefix above the books. Empty/error views
         // may replace the whole list without changing the count or view preference.
-        const targets = new Set<Element>([container, ...container.children]);
+        // The grid's prefixes sit one level down, inside the level page that animates folder navigation.
+        const levelPage = container.querySelector(":scope > .shelf-level-page");
+        const targets = new Set<Element>([container, ...container.children, ...(levelPage?.children ?? [])]);
         const item = container.querySelector(viewMode === "grid"
           ? ".shelf-book-grid .shelf-card"
           : 'tr.shelf-table-row[data-shelf-target="book"]');
