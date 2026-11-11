@@ -102,6 +102,7 @@ import { hasOwnField, chapterLabelForIndex, useNoteEditRef, replaceNoteEditConte
   useNoteEditRelease, BOOKMARK_UNDO_MS } from "./ui/useBookmarksAndNotes";
 import { NOTE_UNDO_MS, usePendingNoteDelete, useVisibleChapterNotes } from "./ui/pendingNoteDelete";
 import { useDeletedNotes } from "./ui/deletedNotesBin";
+import { readSelectionSearchEngine, selectionSearchUrl } from "./ui/selectionSearch";
 import { useHighlightPreferences } from "./ui/highlightPreferences";
 import { highlightAtSelection } from "./ui/highlightModel";
 import { UndoPill, undoDetail } from "./ui/controls/UndoPill";
@@ -3142,6 +3143,11 @@ export default function App() {
                     }}
                     onAddNote={() => {
                       openComposer({ mode: "create", selection: selectionContext, spineIndex: selectedIndex });
+                      readerRef.current?.clearTextSelection();
+                    }}
+                    onWebSearch={(text) => {
+                      const url = selectionSearchUrl(text, readSelectionSearchEngine());
+                      if (url) handleExternalLink(url);
                       readerRef.current?.clearTextSelection();
                     }}
                     onShare={(selection, onHighlight) => {

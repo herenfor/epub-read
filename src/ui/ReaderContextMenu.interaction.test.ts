@@ -42,6 +42,25 @@ describe("selection menu handoff", () => {
     } finally { await dom.dispose(); }
   });
 
+  it("offers web search only when wired, closes the menu and passes the selected text", async () => {
+    const dom = createReactDomHarness();
+    const onWebSearch = vi.fn();
+    const onClose = vi.fn();
+    const menu = (search: boolean) => createElement(ReaderContextMenu, {
+      selection: { text: "量子纠缠" }, position: { x: 50, y: 50 }, onClose, onAddNote: () => undefined,
+      ...(search ? { onWebSearch } : {}),
+    });
+    const button = () => [...dom.container.querySelectorAll("button")].find((item) => item.getAttribute("aria-label") === "网页搜索");
+    try {
+      await dom.render(menu(false));
+      expect(button()).toBeUndefined();
+      await dom.render(menu(true));
+      await dom.click(button()!);
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(onWebSearch).toHaveBeenCalledExactlyOnceWith("量子纠缠");
+    } finally { await dom.dispose(); }
+  });
+
   describe("highlight actions", () => {
     const setup = (target: HighlightTarget | null, custom: string | null = null) => {
       const dom = createReactDomHarness();

@@ -4,6 +4,7 @@ import { defineMessages } from "../defineMessages";
 export const readerMisc = defineMessages("readerMisc", {
   "readerMisc.selection": "选区操作",
   "readerMisc.copy": { zh: "复制", max: 10 },
+  "readerMisc.webSearch": { zh: "网页搜索", note: "Selection menu: search the selected text in the system browser.", max: 14 },
   "readerMisc.copyOriginal": { zh: "复制原文", note: "Copy the book's original text (before character conversion).", max: 14 },
   "readerMisc.addNote": { zh: "添加笔记", max: 12 },
   "readerMisc.highlight.apply": { zh: "高亮", note: "Highlight the selection with the last used style and color.", max: 8 },

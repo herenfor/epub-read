@@ -9,6 +9,8 @@ import type { ReaderTapRegionSettings } from "./readerTapRouting";
 import "./readerTapRegions.css";
 import "./shelfSettings.css";
 import { SettingsSwitchRow } from "./settingsRows";
+import { Segmented } from "./controls/Segmented";
+import { SELECTION_SEARCH_ENGINES, useSelectionSearchEngine } from "./selectionSearch";
 
 /** Reading preferences shared by Settings › Reading on the shelf and the in-reader layer. */
 export interface ReadingSettingsProps {
@@ -67,6 +69,7 @@ export function useReadingSettingsTitles(props: ReadingSettingsProps): string[] 
 
 export function ReadingSettingsContent(props: ReadingSettingsProps) {
   const { t } = useUiText();
+  const [searchEngine, setSearchEngine] = useSelectionSearchEngine();
   const tapLabels = useMemo(() => Object.fromEntries(Object.entries(TAP_REGION_LABEL_KEYS)
     .map(([field, key]) => [field, t(key)])) as unknown as ReaderTapRegionsLabels, [t]);
   const switches: ReactNode[] = [];
@@ -128,6 +131,18 @@ export function ReadingSettingsContent(props: ReadingSettingsProps) {
       </div>
       <div className="shelf-settings-card is-list">{switches}</div>
     </section>}
+    <section className="shelf-settings-group">
+      <div className="shelf-settings-group-head">
+        <span className="shelf-settings-group-label">{t("shelfSettings.group.selection")}</span>
+      </div>
+      <div className="shelf-settings-card">
+        <div className="shelf-settings-control">
+          <span>{t("shelfSettings.selectionSearch")}</span>
+          <Segmented label={t("shelfSettings.selectionSearch")} value={searchEngine} onChange={setSearchEngine}
+            options={SELECTION_SEARCH_ENGINES.map((id) => ({ value: id, label: t(`shelfSettings.selectionSearch.${id}`) }))} />
+        </div>
+      </div>
+    </section>
   </>;
 }
 

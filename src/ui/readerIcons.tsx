@@ -401,6 +401,29 @@ export function WarningCircleIcon({ size = 14, className = "", ...props }: IconP
   );
 }
 
+/** Web search for the selection: a globe, apart from the in-book search magnifier. */
+export function GlobeIcon({ size = 20, className = "", ...props }: IconProps) {
+  return (
+    <svg
+      className={`reader-svg-icon icon-globe ${className}`.trim()}
+      viewBox="0 0 20 20"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      {...props}
+    >
+      <circle cx="10" cy="10" r="7" />
+      <path d="M3 10h14" />
+      <path d="M10 3c2 2 3 4.4 3 7s-1 5-3 7c-2-2-3-4.4-3-7s1-5 3-7z" />
+    </svg>
+  );
+}
+
 export function ShareIcon({ size = 14, className = "", ...props }: IconProps) {
   return (
     <svg

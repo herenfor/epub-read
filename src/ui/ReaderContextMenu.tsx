@@ -5,7 +5,7 @@ import { NOTE_COLOR_NAMES, NOTE_STYLES, type NoteColor, type NoteStyle } from ".
 import { highlightColorProps, type HighlightTarget } from "./highlightModel";
 import type { HighlightPreferences } from "./highlightPreferences";
 import { HighlightColorPicker } from "./HighlightColorPicker";
-import { ChevronDownIcon, CopyIcon, CopyOriginalIcon, HighlighterIcon, NoteIcon, ShareIcon, TrashIcon } from "./readerIcons";
+import { ChevronDownIcon, CopyIcon, CopyOriginalIcon, GlobeIcon, HighlighterIcon, NoteIcon, ShareIcon, TrashIcon } from "./readerIcons";
 import { useMenuTip } from "./useMenuTip";
 import "./highlightMenu.css";
 
@@ -89,6 +89,8 @@ export interface ReaderContextMenuProps {
   onAddNote(selection: ReaderSelectionPayload): void;
   /** Opens the share card for the selection; on a highlight, with its note and colour (ER-0119). */
   onShare?(selection: ReaderSelectionPayload, target: HighlightTarget | null): void;
+  /** Looks the selected text up in the system browser (ER-0181). */
+  onWebSearch?(text: string): void;
   onClose(): void;
   highlight?: ReaderHighlightMenu;
 }
@@ -178,6 +180,10 @@ export function ReaderContextMenu(props: ReaderContextMenuProps) {
     ? action(t("share.menu"), <ShareIcon size={20} />, () => { props.onClose(); props.onShare?.(selection, target); })
     : null;
 
+  const webSearch = props.onWebSearch
+    ? action(t("readerMisc.webSearch"), <GlobeIcon size={20} />, () => { props.onClose(); props.onWebSearch?.(selection.text); })
+    : null;
+
   const highlight = props.highlight;
   if (!highlight) {
     return (
@@ -192,6 +198,7 @@ export function ReaderContextMenu(props: ReaderContextMenuProps) {
         {copyButton}
         {copyOriginal}
         {addNote}
+        {webSearch}
         {shareButton(null)}
         {bubble}
       </div>
@@ -293,6 +300,7 @@ export function ReaderContextMenu(props: ReaderContextMenuProps) {
               () => { props.onClose(); highlight.onEditNote(target); })}
             {copyButton}
             {copyOriginal}
+            {webSearch}
             {shareButton(target)}
             <span className="hl-menu-sep" />
             {action(t("readerMisc.highlight.delete"), <TrashIcon size={20} />,
@@ -313,6 +321,7 @@ export function ReaderContextMenu(props: ReaderContextMenuProps) {
             {addNote}
             {copyButton}
             {copyOriginal}
+            {webSearch}
             {shareButton(null)}
           </div>
         </div>
@@ -336,6 +345,7 @@ export function ReaderContextMenu(props: ReaderContextMenuProps) {
         {addNote}
         {copyButton}
         {copyOriginal}
+        {webSearch}
         {shareButton(null)}
       </div>
     );
