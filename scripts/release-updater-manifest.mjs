@@ -7,8 +7,8 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const CHECK_URL = "https://api.github.com/repos/herenfor/epub-read/releases/latest";
-const MANIFEST_URL = "https://github.com/herenfor/epub-read/releases/latest/download/latest.json";
+const CHECK_URL = "https://api.github.com/repos/herenfor/selis/releases/latest";
+const MANIFEST_URL = "https://github.com/herenfor/selis/releases/latest/download/latest.json";
 const ED25519_SPKI = Buffer.from("302a300506032b6570032100", "hex");
 
 function base64(value) {
@@ -103,7 +103,7 @@ export async function buildUpdaterManifest({ installer, version, privateKeyPath,
     await verifyInstallerSignature(installer, signature, publicKey);
     const manifest = { version, notes, pub_date: publishedAt,
       platforms: { "windows-x86_64": { signature,
-        url: `https://github.com/herenfor/epub-read/releases/download/v${version}/${name}` } } };
+        url: `https://github.com/herenfor/selis/releases/download/v${version}/${name}` } } };
     const temporary = join(workspace, `${randomUUID()}.json`);
     await writeFile(temporary, `${JSON.stringify(manifest, null, 2)}\n`, { flag: "wx" });
     const destination = join(resolve(outputDirectory), "latest.json");

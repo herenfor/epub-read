@@ -8,7 +8,7 @@
     "targets": ["deb"],
     "category": "Reference",
     "shortDescription": "An EPUB, TXT and comic reader",
-    "homepage": "https://github.com/herenfor/epub-read",
+    "homepage": "https://github.com/herenfor/selis",
     "linux": {
       "deb": {
         "section": "text",

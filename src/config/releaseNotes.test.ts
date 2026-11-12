@@ -13,6 +13,6 @@ describe("release notes", () => {
   });
 
   it("points users at the GitHub releases page", () => {
-    expect(RELEASES_PAGE_URL).toBe("https://github.com/herenfor/epub-read/releases");
+    expect(RELEASES_PAGE_URL).toBe("https://github.com/herenfor/selis/releases");
   });
 });

@@ -25,9 +25,9 @@ before(async () => {
   const frontendDirectory = join(directory, "frontend");
   await mkdir(frontendDirectory);
   await writeFile(join(frontendDirectory, "app-update-source.json"), JSON.stringify({ schemaVersion: 1,
-    checkUrl: "https://api.github.com/repos/herenfor/epub-read/releases/latest",
-    manifestUrl: "https://github.com/herenfor/epub-read/releases/latest/download/latest.json", testMode: false }));
-  await writeFile(join(frontendDirectory, "app.js"), 'const endpoint="https://api.github.com/repos/herenfor/epub-read/releases/latest";');
+    checkUrl: "https://api.github.com/repos/herenfor/selis/releases/latest",
+    manifestUrl: "https://github.com/herenfor/selis/releases/latest/download/latest.json", testMode: false }));
+  await writeFile(join(frontendDirectory, "app.js"), 'const endpoint="https://api.github.com/repos/herenfor/selis/releases/latest";');
   options = { installer, version: "0.3.98", privateKeyPath: key, passwordFile,
     publicKeyPath: `${key}.pub`, frontendDirectory, outputDirectory: join(directory, "out") };
 });
@@ -37,7 +37,7 @@ test("signs with a one-use key, verifies the real installer and atomically creat
   result = await buildUpdaterManifest(options);
   assert.equal(result.manifest.version, "0.3.98");
   assert.equal(result.manifest.platforms["windows-x86_64"].url,
-    "https://github.com/herenfor/epub-read/releases/download/v0.3.98/EPUB.Reader_0.3.98_x64-setup.exe");
+    "https://github.com/herenfor/selis/releases/download/v0.3.98/EPUB.Reader_0.3.98_x64-setup.exe");
   assert.deepEqual(await readdir(options.outputDirectory), ["latest.json"]);
   assert.deepEqual(JSON.parse(await readFile(result.path, "utf8")), result.manifest);
 });

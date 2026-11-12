@@ -1,6 +1,6 @@
 # SeLis
 
-[![下载最新版](.github/readme/release.svg)](https://github.com/herenfor/epub-read/releases/latest)
+[![下载最新版](.github/readme/release.svg)](https://github.com/herenfor/selis/releases/latest)
 ![平台](https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows%20%7C%20Android-informational)
 [![许可证](https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF%E8%AF%81-GPL--3.0-blue)](LICENSE)
 
@@ -35,7 +35,7 @@ SeLis 尊重每本书原有的排版设计：版心宽度、不对称边距、�
 
 ## 下载与安装
 
-所有版本均发布在 [Releases](https://github.com/herenfor/epub-read/releases) 页面。
+所有版本均发布在 [Releases](https://github.com/herenfor/selis/releases) 页面。
 
 ### Windows
 
@@ -187,7 +187,7 @@ bash scripts/build-linux.sh --bundles deb    # 本地 Debian 安装包
 
 ## 反馈
 
-遇到问题或有建议，欢迎在 [Issues](https://github.com/herenfor/epub-read/issues) 中提出——每一条反馈都会被认真读完。报告问题时请注明所用平台与版本号（可在「设置 → 关于」中查看）；如果问题只出现在某本书上，也请一并说明书名。
+遇到问题或有建议，欢迎在 [Issues](https://github.com/herenfor/selis/issues) 中提出——每一条反馈都会被认真读完。报告问题时请注明所用平台与版本号（可在「设置 → 关于」中查看）；如果问题只出现在某本书上，也请一并说明书名。
 
 ## 贡献与致谢
 

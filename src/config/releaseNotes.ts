@@ -26,7 +26,7 @@ export const RELEASE_STATUS_LABELS: Readonly<Record<ReleaseNoteStatus, string>> 
 };
 
 /** Where users download new versions; the about panel links here. */
-export const RELEASES_PAGE_URL = "https://github.com/herenfor/epub-read/releases";
+export const RELEASES_PAGE_URL = "https://github.com/herenfor/selis/releases";
 
 /**
  * User-facing notes for the version this build ships. Only the current

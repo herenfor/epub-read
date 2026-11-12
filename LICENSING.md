@@ -2,7 +2,7 @@
 
 Copyright © 2026 HeRenFor.
 
-Project: <https://github.com/herenfor/epub-read>
+Project: <https://github.com/herenfor/selis>
 
 > This document is intended as a licensing guide. In case of conflict, the
 > applicable license text in [LICENSE](LICENSE) controls.
@@ -92,7 +92,7 @@ integration into proprietary closed-source products) require a separate written
 license from the copyright holder.
 
 For licensing inquiries, contact the repository owner through GitHub:
-<https://github.com/herenfor/epub-read>
+<https://github.com/herenfor/selis>
 
 ## Contributions
 
@@ -156,7 +156,7 @@ preserved intact:
   许可例外。
 - **单独授权**：如需将本项目代码用于无法遵守 GPL-3.0 开源义务的场景（如集成进
   商业闭源产品），须另行获得版权所有者的单独书面授权。许可咨询请通过 GitHub 联
-  系仓库所有者（<https://github.com/herenfor/epub-read>）。
+  系仓库所有者（<https://github.com/herenfor/selis>）。
 - **代码贡献**：提交代码前建议先在 Issue 中沟通方案。向本仓库提交贡献即表示你
   有权提交该内容，同意按 `GPL-3.0-only` 授权，并授予项目维护者（`HeRenFor`）在
   SeLis 项目中永久、全球、非排他、免版税地使用、修改、分发及再许可该贡献的权利。

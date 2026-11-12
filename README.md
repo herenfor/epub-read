@@ -1,6 +1,6 @@
 # SeLis
 
-[![Download latest release](.github/readme/release.svg)](https://github.com/herenfor/epub-read/releases/latest)
+[![Download latest release](.github/readme/release.svg)](https://github.com/herenfor/selis/releases/latest)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Android-informational)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
 
@@ -35,7 +35,7 @@ Books are presented as their creators designed them: page width, asymmetric marg
 
 ## Download and install
 
-Every build is published on the [Releases](https://github.com/herenfor/epub-read/releases) page.
+Every build is published on the [Releases](https://github.com/herenfor/selis/releases) page.
 
 ### Windows
 
@@ -187,7 +187,7 @@ The entry sets `VITE_APP_PLATFORM=linux`, writes the frontend to `dist/core-linu
 
 ## Feedback
 
-Bugs and suggestions are welcome in [Issues](https://github.com/herenfor/epub-read/issues) — every one of them gets read. Please include your platform and the app version (shown under *Settings → About*), and the book title if the problem only happens with one book.
+Bugs and suggestions are welcome in [Issues](https://github.com/herenfor/selis/issues) — every one of them gets read. Please include your platform and the app version (shown under *Settings → About*), and the book title if the problem only happens with one book.
 
 ## Contributors and thanks
 

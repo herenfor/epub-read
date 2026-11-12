@@ -1,9 +1,12 @@
 /** Shared release policy. Networking, scheduling, persistence and UI live outside this module. */
-export const UPDATE_CHECK_URL = "https://api.github.com/repos/herenfor/epub-read/releases/latest";
-export const UPDATE_MANIFEST_URL = "https://github.com/herenfor/epub-read/releases/latest/download/latest.json";
+export const UPDATE_CHECK_URL = "https://api.github.com/repos/herenfor/selis/releases/latest";
+export const UPDATE_MANIFEST_URL = "https://github.com/herenfor/selis/releases/latest/download/latest.json";
+// Keep the old name trusted through the 0.4.1 → 0.4.2 rename window. New
+// builds default to `selis`; 0.4.1 clients still accept the redirected old
+// release payload because they already trust both names.
 const RELEASE_ROOTS = [
-  "https://github.com/herenfor/epub-read/releases",
   "https://github.com/herenfor/selis/releases",
+  "https://github.com/herenfor/epub-read/releases",
 ] as const;
 const HOUR = 60 * 60 * 1000;
 
