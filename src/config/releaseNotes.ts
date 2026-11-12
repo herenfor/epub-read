@@ -35,10 +35,9 @@ export const RELEASES_PAGE_URL = "https://github.com/herenfor/selis/releases";
  */
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
-    // Draft for the 0.4.2 release build. Flip status/releasedOn in the release
-    // commit after the release page is actually public.
     version: "0.4.2",
-    status: "development",
+    status: "released",
+    releasedOn: "2026-11-13",
     items: [
       {
         category: "improved",
