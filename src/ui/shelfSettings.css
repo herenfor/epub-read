@@ -243,6 +243,21 @@
   align-items: stretch;
 }
 
+/* 手机宽度下四种语言标签并排会换行；改成 2×2，桌面仍保持一行。 */
+@media (max-width: 480px) {
+  .shelf-settings-control > .ui-segmented.is-language {
+    display: grid;
+    grid-auto-flow: row;
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
+  }
+
+  .shelf-settings-control > .ui-segmented.is-language > button {
+    padding: 0 8px;
+    white-space: nowrap;
+  }
+}
+
 .shelf-settings-row {
   display: flex;
   align-items: center;

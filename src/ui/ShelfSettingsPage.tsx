@@ -186,10 +186,10 @@ export function FolderWatchCard(props: { view: FolderWatchView; windows: boolean
 /** Globe: findable by people who cannot read the current UI language. */
 const LANGUAGE_ICON = <Icon><circle cx="12" cy="12" r="9" /><path d="M3 12h18" /><path d="M12 3c2.4 2.5 3.6 5.5 3.6 9s-1.2 6.5-3.6 9c-2.4-2.5-3.6-5.5-3.6-9S9.6 5.5 12 3z" /></Icon>;
 
-function Segmented<T extends string>(props: { label: string; icon?: ReactNode; value: T; options: Array<{ value: T; label: string }>; onChange(value: T): void }) {
+function Segmented<T extends string>(props: { label: string; icon?: ReactNode; value: T; options: Array<{ value: T; label: string }>; onChange(value: T): void; className?: string }) {
   return <div className="shelf-settings-control">
     {props.icon ? <span className="shelf-settings-control-label">{props.icon}{props.label}</span> : <span>{props.label}</span>}
-    <SegmentedControl label={props.label} value={props.value} options={props.options} onChange={props.onChange} />
+    <SegmentedControl label={props.label} value={props.value} options={props.options} onChange={props.onChange} className={props.className} />
   </div>;
 }
 
@@ -365,7 +365,7 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
     <SettingsSwitchRow title={t("shelfMenu.motion.reduce")} detail={t("shelfMenu.motion.reduce.detail")}
       checked={uiMotion === "reduced"} onChange={(reduce) => setUiMotion(reduce ? "reduced" : "full")} />
     <Segmented label={language.label} icon={LANGUAGE_ICON} value={language.preference} onChange={(value) => language.choose(value as UiLanguagePreference)}
-      options={language.options} />
+      options={language.options} className="is-language" />
     {props.onUiScaleChange && <Segmented label={t("aa.uiScale")}
       value={UI_SCALES.find((option) => Math.abs(Number(option.value) - (props.uiScale ?? 1)) < 0.05)?.value ?? "1"}
       onChange={(value) => props.onUiScaleChange!(Number(value))} options={UI_SCALES} />}
