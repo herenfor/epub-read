@@ -331,8 +331,7 @@
 }
 
 .app[data-touch-ui="true"] .image-viewer-edge,
-.app[data-touch-ui="true"] .image-viewer-zoom-step,
-.app[data-touch-ui="true"] .image-viewer.is-fit .image-viewer-zoom {
+.app[data-touch-ui="true"] .image-viewer-zoom-step {
   display: none;
 }
 
@@ -354,8 +353,7 @@
     inset: var(--iv-safe-top) var(--iv-safe-right) var(--iv-safe-bottom) var(--iv-safe-left);
   }
 
-  .image-viewer-zoom-step,
-  .image-viewer.is-fit .image-viewer-zoom {
+  .image-viewer-zoom-step {
     display: none;
   }
 
@@ -370,6 +368,11 @@
     padding: 0 16px;
     border-radius: 999px;
   }
+}
+
+/* 看图器打开时，标题栏顶部唤出条不应截获浮层顶栏按钮的点击。 */
+.app:has(.image-viewer) .titlebar-zen-sensor {
+  display: none;
 }
 
 /* 减少动态效果：控件显隐与箭头不做淡入淡出。 */
