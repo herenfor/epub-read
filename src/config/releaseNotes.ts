@@ -35,6 +35,46 @@ export const RELEASES_PAGE_URL = "https://github.com/herenfor/selis/releases";
  */
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
+    // Draft for the 0.4.2 release build. Flip status/releasedOn in the release
+    // commit after the release page is actually public.
+    version: "0.4.2",
+    status: "development",
+    items: [
+      {
+        category: "improved",
+        text: "项目仓库迁移到 herenfor/selis，应用内检查更新与发行页地址同步切换。",
+      },
+      {
+        category: "new",
+        text: "图片查看器支持旋转、同章前后翻图、1:1 切换，以及触屏双击、捏合和拖动。",
+      },
+      {
+        category: "new",
+        text: "新增繁体中文界面，可跟随系统或手动切换，重启后保持选择。",
+      },
+      {
+        category: "new",
+        text: "书架文件夹与书混排，文件夹使用叠层卡片，进出层保留滚动位置。",
+      },
+      {
+        category: "new",
+        text: "笔记连续删除可逐条撤销，并增加「最近删除」回收站。",
+      },
+      {
+        category: "new",
+        text: "选中文字菜单新增网页搜索/查词入口。",
+      },
+      {
+        category: "new",
+        text: "手机书架列表显示封面和作者，固定目录增加过渡动画。",
+      },
+      {
+        category: "fixed",
+        text: "修复图片查看器触屏 1:1 入口、顶栏首次点击、手机语言选项溢出等一批问题。",
+      },
+    ],
+  },
+  {
     version: "0.4.1",
     status: "released",
     releasedOn: "2026-11-11",
