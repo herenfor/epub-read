@@ -19,6 +19,15 @@ export interface ImageViewRequest {
   chapterPath: string;
   /** 原书链接原值，只交回既有链接路由，不自行 window.open */
   linkHref?: string;
+  /** 同一章节文档里可查看的图片（文档顺序）与当前序号；只有一张时也可省略。 */
+  gallery?: ImageViewGallery;
+}
+
+export type ImageGalleryItem = Omit<ImageViewRequest, "gallery">;
+
+export interface ImageViewGallery {
+  items: ImageGalleryItem[];
+  index: number;
 }
 
 /** 脚注标记语义：sup/note 结构、多看/掌阅样式类，以及 footnotes.ts 的通用识别。 */
@@ -134,11 +143,36 @@ function imageRequestFromSvgImage(imageEl: Element, chapterPath: string): ImageV
  * 只读取目标的 tag/ownerDocument/属性，可安全传入 iframe 子文档节点。
  */
 export function imageRequestFromTarget(target: Element, chapterPath: string, point?: ImageHitPoint): ImageViewRequest | null {
+  const request = requestFromElement(target, chapterPath);
+  if (!request || (point && !imageContainsPoint(target, request, point))) return null;
+  const gallery = chapterImageGallery(target, chapterPath);
+  return gallery ? { ...request, gallery } : request;
+}
+
+/** 单个元素的识别（不收集图集）；点击判定与图集收集共用同一套规则。 */
+function requestFromElement(target: Element, chapterPath: string): ImageViewRequest | null {
   if (!target || target.nodeType !== 1) return null;
   const tag = localName(target);
-  const request = tag === "img" ? imageRequestFromImg(target as HTMLImageElement, chapterPath)
+  return tag === "img" ? imageRequestFromImg(target as HTMLImageElement, chapterPath)
     : tag === "image" ? imageRequestFromSvgImage(target, chapterPath) : null;
-  return request && (!point || imageContainsPoint(target, request, point)) ? request : null;
+}
+
+/**
+ * 同一章节文档里按文档顺序收集可查看图片（与点击同一识别规则，脚注图标等已排除）。
+ * 只有当前一张或找不到当前图时返回 undefined，浮层按单图处理。
+ */
+export function chapterImageGallery(target: Element, chapterPath: string): ImageViewGallery | undefined {
+  const doc = target.ownerDocument;
+  if (!doc || typeof doc.querySelectorAll !== "function") return undefined;
+  const items: ImageGalleryItem[] = [];
+  let index = -1;
+  for (const el of Array.from(doc.querySelectorAll("img, image"))) {
+    const request = requestFromElement(el, chapterPath);
+    if (!request) continue;
+    if (el === target) index = items.length;
+    items.push(request);
+  }
+  return index >= 0 && items.length > 1 ? { items, index } : undefined;
 }
 
 
@@ -201,7 +235,7 @@ export function isImageBlankAtPoint(target: Element | null, point: ImageHitPoint
   if (!target) return false;
   const candidate = localName(target) === "svg" ? target.querySelector(":scope > image") : target.closest("img, image");
   if (!candidate) return false;
-  const image = imageRequestFromTarget(candidate, "");
+  const image = requestFromElement(candidate, "");
   return Boolean(image && !imageContainsPoint(candidate, image, point));
 }
 

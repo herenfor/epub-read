@@ -124,6 +124,7 @@ import {
 } from "./pagedSpread";
 import { installPageBackgroundLanes, type PageBackgroundLanes } from "./pageBackgroundLanes";
 import { imageRequestFromTarget, isImageBlankAtPoint, prepareImageHitAreas } from "./imageActivation";
+import type { ImageViewGallery } from "./imageActivation";
 import { columnAtPoint, containingFragmentAtPoint, type FragmentSpace } from "./fragmentGeometry";
 import {
   foldSpreadIntoPages,
@@ -262,6 +263,8 @@ export interface ImageActivationPayload {
   naturalHeight: number;
   chapterPath: string;
   linkHref?: string;
+  /** 同章可查看图片列表与当前序号（看图器内前后翻看）。 */
+  gallery?: ImageViewGallery;
 }
 
 export interface LoadOptions {
@@ -9802,6 +9805,7 @@ export class ChapterPaginator {
       naturalHeight: request.naturalHeight,
       chapterPath: this._currentPath,
       linkHref: linkHref || undefined,
+      gallery: request.gallery,
     });
     return true;
   }

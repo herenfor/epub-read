@@ -142,6 +142,36 @@ describe("imageRequestFromTarget：SVG 单 image 包装", () => {
   });
 });
 
+describe("imageRequestFromTarget：本章图集", () => {
+  it("按文档顺序收集本章可查看图片并给出当前序号，脚注图标与未加载图片不计入", () => {
+    const d = doc(`<p><img id="a" src="blob:reader/a"/></p>
+<p>正文<a href="#fn1" epub:type="noteref"><img id="fn" src="blob:reader/fn"/></a></p>
+<sup><img id="sup" src="blob:reader/sup"/></sup>
+<img id="broken" src="blob:reader/broken"/>
+<svg viewBox="0 0 20 30"><image id="svg" xlink:href="blob:reader/svg"/></svg>
+<a href="other.xhtml"><img id="b" alt="链接图" src="blob:reader/b"/></a>`);
+    for (const id of ["a", "fn", "sup", "b"]) loaded(pick(d, `#${id}`));
+    loaded(pick(d, "#broken"), 0, 0, false);
+    const request = imageRequestFromTarget(pick(d, "#b"), "OEBPS/ch1.xhtml");
+    expect(request?.gallery?.items.map((item) => item.src)).toEqual([
+      "blob:reader/a",
+      "blob:reader/svg",
+      "blob:reader/b",
+    ]);
+    expect(request?.gallery?.index).toBe(2);
+    expect(request?.gallery?.items[2]).toMatchObject({ linkHref: "other.xhtml", chapterPath: "OEBPS/ch1.xhtml" });
+    expect(request?.gallery?.items[1]).toMatchObject({ naturalWidth: 20, naturalHeight: 30 });
+  });
+
+  it("本章只有一张可查看图片时不带图集", () => {
+    const d = doc(`<img src="blob:reader/only"/><sup><img src="blob:reader/icon"/></sup>`);
+    for (const img of Array.from(d.querySelectorAll("img"))) loaded(img);
+    const request = imageRequestFromTarget(pick(d, "img"), "ch.xhtml");
+    expect(request?.src).toBe("blob:reader/only");
+    expect(request?.gallery).toBeUndefined();
+  });
+});
+
 describe("imageRequestFromTarget：跨 iframe 文档节点", () => {
   it("来自另一 realm 的 img/svg image 不依赖宿主 instanceof", () => {
     const { document: iframeDoc } = parseHTML(

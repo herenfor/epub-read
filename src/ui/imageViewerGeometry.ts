@@ -132,6 +132,43 @@ export function wheelZoomFactor(deltaY: number): number {
   return Math.min(2, Math.max(0.5, factor));
 }
 
+/** 旋转按 90° 计数，归一到 0..3（负数向左转）。 */
+export function normalizeQuarterTurns(turns: number): number {
+  if (!Number.isFinite(turns)) return 0;
+  const whole = Math.trunc(turns);
+  return ((whole % 4) + 4) % 4;
+}
+
+/** 旋转后的显示宽高：奇数个 90° 时宽高互换；适配与平移边界都用这组尺寸。 */
+export function rotatedSize(width: number, height: number, quarterTurns: number): { width: number; height: number } {
+  return normalizeQuarterTurns(quarterTurns) % 2 === 1 ? { width: height, height: width } : { width, height };
+}
+
+/** 百分比按钮：适配时去原始大小（1:1），否则回到适配。 */
+export function fitOrActualTargetScale(currentScale: number, fitScale: number, maxScale: number): number {
+  return isAtFit(currentScale) ? originalSizeScale(fitScale, maxScale) : MIN_IMAGE_SCALE;
+}
+
+/** 相对原图像素的显示百分比（1:1 = 100%）。 */
+export function displayPercent(fitScale: number, scale: number): number {
+  const fit = isPositiveFinite(fitScale) ? fitScale : MIN_IMAGE_SCALE;
+  const relative = isPositiveFinite(scale) ? scale : MIN_IMAGE_SCALE;
+  return Math.round(fit * relative * 100);
+}
+
+/** 适配状态下横向滑动超过该距离才换图。 */
+export const SWIPE_SWITCH_DISTANCE = 60;
+
+/**
+ * 适配态横滑翻图判定：横向位移超过阈值且明显大于纵向位移时，左滑（dx<0）= 下一张(+1)，
+ * 右滑 = 上一张(-1)；否则 0（回弹）。
+ */
+export function swipeDirection(dx: number, dy: number, threshold = SWIPE_SWITCH_DISTANCE): -1 | 0 | 1 {
+  if (!Number.isFinite(dx) || !Number.isFinite(dy)) return 0;
+  if (Math.abs(dx) < threshold || Math.abs(dx) <= Math.abs(dy)) return 0;
+  return dx < 0 ? 1 : -1;
+}
+
 export function pointerDistance(a: Point, b: Point): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }

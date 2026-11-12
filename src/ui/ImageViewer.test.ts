@@ -76,14 +76,15 @@ describe("ImageViewer 结构", () => {
 
   it("渲染遮罩、图片与 适配/原始大小/关闭 控件", () => {
     const html = renderToStaticMarkup(createElement(ImageViewer, { image: baseImage, onClose() {} }));
-    expect(html).toContain('class="image-viewer"');
+    expect(html).toContain('class="image-viewer');
     expect(html).toContain('role="dialog"');
     expect(html).toContain('src="blob:reader/pic"');
-    expect(html).toContain('aria-label="适配窗口"');
-    expect(html).toContain('aria-label="原始大小"');
     expect(html).toContain('aria-label="缩小"');
     expect(html).toContain('aria-label="放大"');
     expect(html).toContain('aria-label="关闭"');
+    expect(html).toContain('aria-label="向左旋转"');
+    expect(html).toContain('aria-label="向右旋转"');
+    expect(html).toContain("100%");
     // 无 linkHref 时不显示链接入口
     expect(html).not.toContain("打开链接");
   });
@@ -138,15 +139,23 @@ describe("ImageViewer 关闭与焦点", () => {
     expect(getActive()).toBe(closeButton);
     expect(closeButton.getAttribute("aria-label")).toBe("关闭");
 
-    // Tab 从最后一个可聚焦元素回绕到第一个，不跑到背景。
+    // 最后一个可用控件是“放大”（适配态下“缩小”禁用）。从最后一个控件 Tab 回绕到第一个（向左旋转）。
+    const zoomIn = query<HTMLButtonElement>(harness, 'button[aria-label="放大"]');
+    setActive(zoomIn);
     const keydown = fire(window, "keydown", { key: "Tab" });
     await act(async () => {
       doc.dispatchEvent(keydown);
     });
     expect(keydown.defaultPrevented).toBe(true);
-    // 适配态下“缩小/适配”禁用，回绕到第一个可用控件（放大）。
-    expect(getActive()).toBe(query(harness, ".image-viewer-controls button:not([disabled])"));
-    expect((getActive() as Element).getAttribute("aria-label")).toBe("放大");
+    expect(getActive()).toBe(query(harness, ".image-viewer-rotate-left"));
+
+    // 第一个控件 Shift+Tab 回绕到最后一个控件（放大）。
+    const shiftTab = fire(window, "keydown", { key: "Tab", shiftKey: true });
+    await act(async () => {
+      doc.dispatchEvent(shiftTab);
+    });
+    expect(shiftTab.defaultPrevented).toBe(true);
+    expect(getActive()).toBe(zoomIn);
 
     await harness.render(createElement(ImageViewer, { image: null, onClose }));
     expect(getActive()).toBe(previous);
@@ -242,25 +251,29 @@ describe("ImageViewer 缩放/拖动核心", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("原始大小达到 1:1，缩回适配后居中且缩小按钮禁用", async () => {
+  it("百分比按钮在适配与原始大小 1:1 之间切换，缩回后居中且缩小按钮禁用", async () => {
     const { harness, onClose } = setup();
     await harness.render(createElement(ImageViewer, { image: baseImage, onClose }));
     const image = query<HTMLElement>(harness, ".image-viewer-image");
     const zoomOut = query<HTMLButtonElement>(harness, 'button[aria-label="缩小"]');
-    const fit = query<HTMLButtonElement>(harness, 'button[aria-label="适配窗口"]');
+    const percentBtn = query<HTMLButtonElement>(harness, ".image-viewer-percent");
 
     expect(zoomOut.disabled).toBe(true);
-    expect(fit.disabled).toBe(true);
+    // 400x300 视口适配 1000x500 图片，基准为 400x200（原图的 40%）。
+    expect(percentBtn.textContent).toBe("40%");
 
-    await harness.click(query(harness, 'button[aria-label="原始大小"]'));
-    // fit=0.4 → 原始大小 = 1/0.4 = 2.5 倍。
+    // 点按百分比切到 1:1 原始大小。fit=0.4 → 原始大小为 1/0.4 = 2.5 倍（原图的 100%）。
+    await harness.click(percentBtn);
     expect(image.style.transform).toContain("scale(2.5)");
     expect(zoomOut.disabled).toBe(false);
+    expect(percentBtn.textContent).toBe("100%");
 
-    await harness.click(fit);
+    // 再次点按回到适配窗口（居中 1 倍，40%），缩小按钮恢复禁用。
+    await harness.click(percentBtn);
     expect(image.style.transform).toContain("scale(1)");
     expect(image.style.transform).toContain("translate(0px, 0px)");
-    expect(fit.disabled).toBe(true);
+    expect(zoomOut.disabled).toBe(true);
+    expect(percentBtn.textContent).toBe("40%");
   });
 
   it("提供 onFollowLink 时“打开链接”交回原请求", async () => {
@@ -270,5 +283,160 @@ describe("ImageViewer 缩放/拖动核心", () => {
     await harness.click(query(harness, ".image-viewer-link"));
     expect(onFollowLink).toHaveBeenCalledWith(linked);
     expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+describe("ImageViewer 旋转", () => {
+  it("点击向左/向右旋转按钮旋转 90°，重置到居中适配", async () => {
+    const { harness, onClose } = setup();
+    await harness.render(createElement(ImageViewer, { image: baseImage, onClose }));
+    const image = query<HTMLElement>(harness, ".image-viewer-image");
+    const rotateLeft = query<HTMLButtonElement>(harness, ".image-viewer-rotate-left");
+    const rotateRight = query<HTMLButtonElement>(harness, ".image-viewer-rotate-right");
+
+    // 初始 0°
+    expect(image.style.transform).toContain("rotate(0deg)");
+
+    // 向右旋转 90°
+    await harness.click(rotateRight);
+    expect(image.style.transform).toContain("rotate(90deg)");
+
+    // 再向右旋转 90° -> 180°
+    await harness.click(rotateRight);
+    expect(image.style.transform).toContain("rotate(180deg)");
+
+    // 向左旋转 90° -> 90°
+    await harness.click(rotateLeft);
+    expect(image.style.transform).toContain("rotate(90deg)");
+  });
+
+  it("键盘快捷键 r 向右旋转、Shift+r 向左旋转", async () => {
+    const { harness, doc, window, onClose } = setup();
+    await harness.render(createElement(ImageViewer, { image: baseImage, onClose }));
+    const image = query<HTMLElement>(harness, ".image-viewer-image");
+
+    await act(async () => {
+      doc.dispatchEvent(fire(window, "keydown", { key: "r" }));
+    });
+    expect(image.style.transform).toContain("rotate(90deg)");
+
+    await act(async () => {
+      doc.dispatchEvent(fire(window, "keydown", { key: "R", shiftKey: true }));
+    });
+    expect(image.style.transform).toContain("rotate(0deg)");
+  });
+});
+
+describe("ImageViewer 图集与前后翻看", () => {
+  const galleryImage: ImageViewRequest = {
+    ...baseImage,
+    gallery: {
+      items: [
+        { src: "blob:reader/pic1", alt: "图1", naturalWidth: 1000, naturalHeight: 500, chapterPath: "ch1.xhtml" },
+        { src: "blob:reader/pic2", alt: "图2", naturalWidth: 800, naturalHeight: 600, chapterPath: "ch1.xhtml" },
+        { src: "blob:reader/pic3", alt: "图3", naturalWidth: 600, naturalHeight: 400, chapterPath: "ch1.xhtml" },
+      ],
+      index: 0,
+    },
+  };
+
+  it("多图时显示计数器与翻图箭头，点击上一张/下一张切换图片并重置旋转与缩放", async () => {
+    const { harness, onClose } = setup();
+    await harness.render(createElement(ImageViewer, { image: galleryImage, onClose }));
+
+    const counter = query(harness, ".image-viewer-counter");
+    expect(counter.textContent).toBe("1 / 3");
+    expect(harness.container.querySelector(".image-viewer-edge.is-prev")).toBeNull();
+    const nextBtn = query<HTMLButtonElement>(harness, ".image-viewer-edge.is-next");
+
+    // 点击下一张
+    await harness.click(nextBtn);
+    expect(counter.textContent).toBe("2 / 3");
+    expect(query<HTMLImageElement>(harness, ".image-viewer-image").src).toBe("blob:reader/pic2");
+    expect(harness.container.querySelector(".image-viewer-edge.is-prev")).not.toBeNull();
+    expect(harness.container.querySelector(".image-viewer-edge.is-next")).not.toBeNull();
+
+    // 点击下一张到达最后一张
+    await harness.click(query<HTMLButtonElement>(harness, ".image-viewer-edge.is-next"));
+    expect(counter.textContent).toBe("3 / 3");
+    expect(query<HTMLImageElement>(harness, ".image-viewer-image").src).toBe("blob:reader/pic3");
+    expect(harness.container.querySelector(".image-viewer-edge.is-next")).toBeNull();
+
+    // 点击上一张回到第二张
+    await harness.click(query<HTMLButtonElement>(harness, ".image-viewer-edge.is-prev"));
+    expect(counter.textContent).toBe("2 / 3");
+    expect(query<HTMLImageElement>(harness, ".image-viewer-image").src).toBe("blob:reader/pic2");
+  });
+
+  it("键盘方向键 Left / Right 翻看上一张 / 下一张，首末张不越界", async () => {
+    const { harness, doc, window, onClose } = setup();
+    await harness.render(createElement(ImageViewer, { image: galleryImage, onClose }));
+
+    const counter = query(harness, ".image-viewer-counter");
+    expect(counter.textContent).toBe("1 / 3");
+
+    // 第一张按 Left 不越界
+    await act(async () => {
+      doc.dispatchEvent(fire(window, "keydown", { key: "ArrowLeft" }));
+    });
+    expect(counter.textContent).toBe("1 / 3");
+
+    // 按 Right 翻到第二张、第三张
+    await act(async () => {
+      doc.dispatchEvent(fire(window, "keydown", { key: "ArrowRight" }));
+    });
+    expect(counter.textContent).toBe("2 / 3");
+
+    await act(async () => {
+      doc.dispatchEvent(fire(window, "keydown", { key: "ArrowRight" }));
+    });
+    expect(counter.textContent).toBe("3 / 3");
+
+    // 末张按 Right 不越界
+    await act(async () => {
+      doc.dispatchEvent(fire(window, "keydown", { key: "ArrowRight" }));
+    });
+    expect(counter.textContent).toBe("3 / 3");
+
+    // 按 Left 回到第二张
+    await act(async () => {
+      doc.dispatchEvent(fire(window, "keydown", { key: "ArrowLeft" }));
+    });
+    expect(counter.textContent).toBe("2 / 3");
+  });
+
+  it("适配态单指横滑翻图：向左滑翻下一张，向右滑翻上一张", async () => {
+    const { harness, window, onClose } = setup();
+    await harness.render(createElement(ImageViewer, { image: galleryImage, onClose }));
+    const stage = query(harness, ".image-viewer-stage");
+    const counter = query(harness, ".image-viewer-counter");
+    expect(counter.textContent).toBe("1 / 3");
+
+    const touch = (type: string, props: Record<string, unknown>) =>
+      fire(window, type, { pointerType: "touch", button: 0, buttons: 1, pointerId: 1, ...props });
+
+    // 从 200, 150 向左滑动 80px (到 120, 150) -> 下一张
+    await act(async () => {
+      stage.dispatchEvent(touch("pointerdown", { clientX: 200, clientY: 150 }));
+    });
+    await act(async () => {
+      stage.dispatchEvent(touch("pointermove", { clientX: 120, clientY: 150 }));
+    });
+    await act(async () => {
+      stage.dispatchEvent(touch("pointerup", { clientX: 120, clientY: 150, buttons: 0 }));
+    });
+    expect(counter.textContent).toBe("2 / 3");
+
+    // 从 200, 150 向右滑动 80px (到 280, 150) -> 上一张
+    await act(async () => {
+      stage.dispatchEvent(touch("pointerdown", { clientX: 200, clientY: 150 }));
+    });
+    await act(async () => {
+      stage.dispatchEvent(touch("pointermove", { clientX: 280, clientY: 150 }));
+    });
+    await act(async () => {
+      stage.dispatchEvent(touch("pointerup", { clientX: 280, clientY: 150, buttons: 0 }));
+    });
+    expect(counter.textContent).toBe("1 / 3");
   });
 });

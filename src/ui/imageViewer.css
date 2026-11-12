@@ -1,41 +1,72 @@
 /*
  * 正文图片查看浮层（AI-A 模块私有样式，由 ImageViewer.tsx 直接 import）。
  * 只作用于 .image-viewer 命名空间；不改共享 styles.css，也不给正文/body 加 touch-action。
+ * 看图器始终深色、完全不透明，不跟随阅读主题；控件浮在图上，可自动隐去。
  */
 
 .image-viewer {
+  --iv-bg: #0b0b0c;
+  --iv-fg: rgba(255, 255, 255, 0.9);
+  --iv-muted: rgba(255, 255, 255, 0.56);
+  --iv-tint: rgba(255, 255, 255, 0.09);
+  --iv-tint-strong: rgba(255, 255, 255, 0.16);
+  --iv-line: rgba(255, 255, 255, 0.1);
+  --iv-float: rgba(30, 30, 32, 0.72);
+  --iv-bar: 56px;
+  --iv-safe-top: env(safe-area-inset-top, 0px);
+  --iv-safe-right: env(safe-area-inset-right, 0px);
+  --iv-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --iv-safe-left: env(safe-area-inset-left, 0px);
+
   position: fixed;
   inset: 0;
-  z-index: calc(var(--z-ui-mobile-bar) + 20);
-  display: flex;
-  flex-direction: column;
+  /* 盖住阅读页脚、工具栏与面板。 */
+  z-index: var(--z-ui-modal);
   box-sizing: border-box;
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
-  background: rgba(10, 10, 12, 0.94);
-  color: #f2f2f2;
+  background: var(--iv-bg);
+  color: var(--iv-fg);
+  color-scheme: dark;
   overscroll-behavior: none;
   touch-action: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
+/* 桌面：图片区让出顶栏与底部缩放胶囊。 */
 .image-viewer-stage {
-  position: relative;
-  flex: 1 1 auto;
-  min-height: 0;
+  position: absolute;
+  top: calc(var(--iv-safe-top) + var(--iv-bar));
+  right: var(--iv-safe-right);
+  bottom: calc(var(--iv-safe-bottom) + var(--iv-bar));
+  left: var(--iv-safe-left);
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
   touch-action: none;
   overscroll-behavior: none;
+  cursor: default;
+}
+
+.image-viewer.is-zoomed .image-viewer-stage {
   cursor: grab;
 }
 
-.image-viewer-stage:active {
+.image-viewer.is-zoomed .image-viewer-stage:active {
   cursor: grabbing;
+}
+
+.image-viewer-paint-surface {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
 }
 
 .image-viewer-image {
   display: block;
+  flex: none;
   max-width: none;
   max-height: none;
   object-fit: contain;
@@ -47,72 +78,6 @@
   will-change: transform;
 }
 
-.image-viewer-controls {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.82), rgba(0, 0, 0, 0));
-}
-
-.image-viewer-btn {
-  min-width: 44px;
-  min-height: 44px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-  padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  border-radius: var(--r-md);
-  background: rgba(255, 255, 255, 0.12);
-  color: #f2f2f2;
-  font: inherit;
-  font-size: var(--fs-body);
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.image-viewer-btn:hover {
-  background: rgba(255, 255, 255, 0.22);
-}
-
-.image-viewer-btn:disabled {
-  opacity: 0.38;
-  cursor: default;
-}
-
-.image-viewer-link {
-  padding: 0 16px;
-}
-
-.image-viewer-original {
-  font-variant-numeric: tabular-nums;
-}
-
-.image-viewer-close {
-  background: rgba(255, 255, 255, 0.18);
-}
-
-.image-viewer-scale {
-  min-width: 52px;
-  text-align: center;
-  color: rgba(255, 255, 255, 0.78);
-  font-size: var(--fs-caption);
-  font-variant-numeric: tabular-nums;
-}
-
-@media (max-width: 480px) {
-  .image-viewer-controls {
-    gap: 6px;
-    padding-left: 8px;
-    padding-right: 8px;
-  }
-}
-
 .image-viewer-visual-overlay {
   position: absolute;
   inset: 0;
@@ -120,24 +85,295 @@
   pointer-events: none;
 }
 
-/* “原图”是按住对比的文字按钮：与“打开链接”同样留出左右内边距，按住时用主题强调色。 */
+/* ---- 控件层 ---- */
+
+.image-viewer-chrome {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  transition: opacity var(--motion-base, 220ms) var(--ease-standard, ease);
+}
+
+.image-viewer-chrome > * {
+  pointer-events: auto;
+}
+
+.image-viewer.is-chrome-hidden .image-viewer-chrome {
+  opacity: 0;
+}
+
+.image-viewer.is-chrome-hidden .image-viewer-chrome,
+.image-viewer.is-chrome-hidden .image-viewer-chrome * {
+  pointer-events: none;
+}
+
+/* 键盘焦点进来时控件立即可见（计时由组件重置）。 */
+.image-viewer.is-chrome-hidden .image-viewer-chrome:focus-within {
+  opacity: 1;
+}
+
+.image-viewer-topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  box-sizing: border-box;
+  height: calc(var(--iv-safe-top) + var(--iv-bar));
+  padding: var(--iv-safe-top) calc(10px + var(--iv-safe-right)) 0 calc(10px + var(--iv-safe-left));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0));
+}
+
+.image-viewer-topbar-start,
+.image-viewer-topbar-end {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.image-viewer-topbar-start {
+  justify-self: start;
+}
+
+.image-viewer-topbar-end {
+  justify-self: end;
+}
+
+.image-viewer-counter {
+  color: var(--iv-muted);
+  font-size: var(--fs-caption);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.image-viewer-btn {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  box-sizing: border-box;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--iv-fg);
+  font: inherit;
+  font-size: var(--fs-caption);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.image-viewer-btn:hover:not(:disabled) {
+  background: var(--iv-tint);
+}
+
+.image-viewer-btn:active:not(:disabled) {
+  background: var(--iv-tint-strong);
+}
+
+.image-viewer-btn:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.image-viewer-btn:focus-visible,
+.image-viewer-percent:focus-visible,
+.image-viewer-edge:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent, #6ea8dc) 80%, #fff);
+  outline-offset: 1px;
+}
+
+/* 文字按钮（打开链接 / 原图）：胶囊形，常带淡底。 */
+.image-viewer-btn.is-text {
+  width: auto;
+  max-width: 100%;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: var(--iv-tint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .image-viewer-compare {
-  padding: 0 16px;
   touch-action: none;
   -webkit-user-select: none;
   user-select: none;
 }
 
-.image-viewer-btn.is-active {
-  border-color: color-mix(in srgb, var(--accent, #6ea8dc) 70%, #fff);
-  background: color-mix(in srgb, var(--accent, #6ea8dc) 34%, transparent);
+.image-viewer-btn.is-active,
+.image-viewer-btn.is-active:hover {
+  background: color-mix(in srgb, var(--accent, #6ea8dc) 45%, transparent);
 }
 
-.image-viewer-paint-surface {
+/* 左右边缘翻图箭头：鼠标靠近边缘或键盘聚焦时出现。 */
+.image-viewer-edge {
   position: absolute;
-  inset: 0;
+  top: 50%;
+  width: 44px;
+  height: 44px;
+  margin-top: -22px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--iv-float);
+  color: var(--iv-fg);
+  cursor: pointer;
+  opacity: 0;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: opacity var(--motion-fast, 160ms) var(--ease-standard, ease);
+}
+
+.image-viewer-chrome > .image-viewer-edge {
+  pointer-events: none;
+}
+
+.image-viewer-edge.is-prev {
+  left: calc(16px + var(--iv-safe-left));
+}
+
+.image-viewer-edge.is-next {
+  right: calc(16px + var(--iv-safe-right));
+}
+
+.image-viewer-chrome > .image-viewer-edge.is-near,
+.image-viewer-chrome > .image-viewer-edge:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.image-viewer-edge:hover {
+  background: rgba(60, 60, 62, 0.85);
+}
+
+/* 底部居中缩放胶囊：[−] [百分比] [+]，百分比在适配和原始大小之间切换。 */
+.image-viewer-zoom {
+  position: absolute;
+  left: 50%;
+  bottom: calc(10px + var(--iv-safe-bottom));
+  transform: translateX(-50%);
   display: flex;
   align-items: center;
-  justify-content: center;
-  overflow: hidden;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--iv-float);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.image-viewer-zoom .image-viewer-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+}
+
+.image-viewer-percent {
+  min-width: 54px;
+  height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--iv-fg);
+  font: inherit;
+  font-size: var(--fs-caption);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.image-viewer-percent:hover {
+  background: var(--iv-tint);
+}
+
+/* ---- 触屏 / 窄屏：图片铺满，控件更大，不要 −/+，适配时不显示百分比 ---- */
+
+.app[data-touch-ui="true"] .image-viewer-stage {
+  inset: var(--iv-safe-top) var(--iv-safe-right) var(--iv-safe-bottom) var(--iv-safe-left);
+}
+
+.app[data-touch-ui="true"] .image-viewer-topbar {
+  height: calc(var(--iv-safe-top) + 60px);
+  padding-left: calc(8px + var(--iv-safe-left));
+  padding-right: calc(8px + var(--iv-safe-right));
+}
+
+.app[data-touch-ui="true"] .image-viewer-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+}
+
+.app[data-touch-ui="true"] .image-viewer-btn.is-text {
+  width: auto;
+  min-height: 44px;
+  padding: 0 14px;
+}
+
+.app[data-touch-ui="true"] .image-viewer-btn:hover:not(:disabled):not(.is-active) {
+  background: transparent;
+}
+
+.app[data-touch-ui="true"] .image-viewer-btn.is-text:not(.is-active) {
+  background: var(--iv-tint);
+}
+
+.app[data-touch-ui="true"] .image-viewer-edge,
+.app[data-touch-ui="true"] .image-viewer-zoom-step,
+.app[data-touch-ui="true"] .image-viewer.is-fit .image-viewer-zoom {
+  display: none;
+}
+
+.app[data-touch-ui="true"] .image-viewer-zoom {
+  bottom: calc(20px + var(--iv-safe-bottom));
+  padding: 0;
+  border-radius: 999px;
+}
+
+.app[data-touch-ui="true"] .image-viewer-percent {
+  min-width: 64px;
+  height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+}
+
+@media (max-width: 480px) {
+  .image-viewer-stage {
+    inset: var(--iv-safe-top) var(--iv-safe-right) var(--iv-safe-bottom) var(--iv-safe-left);
+  }
+
+  .image-viewer-zoom-step,
+  .image-viewer.is-fit .image-viewer-zoom {
+    display: none;
+  }
+
+  .image-viewer-zoom {
+    padding: 0;
+    border-radius: 999px;
+  }
+
+  .image-viewer-percent {
+    min-width: 64px;
+    height: 44px;
+    padding: 0 16px;
+    border-radius: 999px;
+  }
+}
+
+/* 减少动态效果：控件显隐与箭头不做淡入淡出。 */
+:root[data-motion="reduced"] .image-viewer-chrome,
+:root[data-motion="reduced"] .image-viewer-edge {
+  transition: none;
 }

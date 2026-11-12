@@ -333,6 +333,10 @@ export function useReaderShortcuts({
         return;
       }
 
+      // 看图器打开时方向键、翻页键与换章键都归看图器，不在背后翻页或换章（Esc 由看图器先关自己）。
+      if (st.imageViewerOpen && (e.key.startsWith("Arrow") || e.key === "PageUp" || e.key === "PageDown" ||
+        e.key === " " || e.key === "[" || e.key === "]")) return;
+
       // 6. Alt + Left / Alt + Right：历史阅读位置后退 / 前进，若无跳转历史则切上一章/下一章
       if (e.altKey && e.key === "ArrowLeft") {
         e.preventDefault();

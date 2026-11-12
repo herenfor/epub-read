@@ -379,6 +379,39 @@ export function RotateCcwIcon({ size = 14, className = "", ...props }: IconProps
   );
 }
 
+/** 图片旋转：圆弧箭头 + 小方块，区别于“复原”用的 RotateCcwIcon。 */
+function RotateQuarterIcon({ size = 18, className = "", mirrored, ...props }: IconProps & { mirrored: boolean }) {
+  return (
+    <svg
+      className={`reader-svg-icon ${className}`.trim()}
+      viewBox="0 0 20 20"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      {...props}
+    >
+      <g transform={mirrored ? "matrix(-1 0 0 1 20 0)" : undefined}>
+        <path d="M4 3.5v3.5h3.5" />
+        <path d="M4.3 7A6.5 6.5 0 0 1 16.5 9.5" />
+        <rect x="7.5" y="10.5" width="7" height="6" rx="1" />
+      </g>
+    </svg>
+  );
+}
+
+export function RotateLeftIcon(props: IconProps) {
+  return <RotateQuarterIcon {...props} mirrored={false} />;
+}
+
+export function RotateRightIcon(props: IconProps) {
+  return <RotateQuarterIcon {...props} mirrored />;
+}
+
 export function WarningCircleIcon({ size = 14, className = "", ...props }: IconProps) {
   return (
     <svg

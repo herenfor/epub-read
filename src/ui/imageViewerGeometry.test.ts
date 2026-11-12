@@ -3,7 +3,12 @@ import {
   clampImagePan,
   clampScale,
   computeFitScale,
+  displayPercent,
+  fitOrActualTargetScale,
   isAtFit,
+  normalizeQuarterTurns,
+  rotatedSize,
+  swipeDirection,
   maxScaleForFit,
   nextDoubleTapScale,
   originalSizeScale,
@@ -108,6 +113,54 @@ describe("按钮/双击比例", () => {
     expect(isAtFit(1)).toBe(true);
     expect(isAtFit(1.005)).toBe(true);
     expect(isAtFit(1.2)).toBe(false);
+  });
+});
+
+describe("旋转、百分比与横滑", () => {
+  it("normalizeQuarterTurns 归一到 0..3，左转为负", () => {
+    expect(normalizeQuarterTurns(0)).toBe(0);
+    expect(normalizeQuarterTurns(5)).toBe(1);
+    expect(normalizeQuarterTurns(-1)).toBe(3);
+    expect(normalizeQuarterTurns(Number.NaN)).toBe(0);
+  });
+
+  it("rotatedSize 奇数个 90° 时交换宽高", () => {
+    expect(rotatedSize(1000, 500, 0)).toEqual({ width: 1000, height: 500 });
+    expect(rotatedSize(1000, 500, 1)).toEqual({ width: 500, height: 1000 });
+    expect(rotatedSize(1000, 500, 2)).toEqual({ width: 1000, height: 500 });
+    expect(rotatedSize(1000, 500, -1)).toEqual({ width: 500, height: 1000 });
+  });
+
+  it("旋转后适配与平移边界用旋转后的宽高", () => {
+    const rotated = rotatedSize(1000, 500, 1);
+    const fit = computeFitScale(rotated.width, rotated.height, 400, 300);
+    expect(fit).toBeCloseTo(0.3);
+    // 显示 150x300：2 倍时 300x600，x 不可平移，y 可到 ±150。
+    const clamped = clampImagePan({ scale: 2, x: 99, y: 999 }, rotated.width * fit, rotated.height * fit, 400, 300);
+    expect(clamped.x).toBe(0);
+    expect(clamped.y).toBeCloseTo(150);
+  });
+
+  it("fitOrActualTargetScale 在适配与原始大小之间切换", () => {
+    expect(fitOrActualTargetScale(1, 0.4, 4)).toBe(2.5);
+    expect(fitOrActualTargetScale(2.5, 0.4, 4)).toBe(1);
+    expect(fitOrActualTargetScale(1.7, 0.4, 4)).toBe(1);
+    // 小图适配即原始大小，按了也停在 1。
+    expect(fitOrActualTargetScale(1, 1, 4)).toBe(1);
+  });
+
+  it("displayPercent 以原图像素为 100%", () => {
+    expect(displayPercent(0.4, 1)).toBe(40);
+    expect(displayPercent(0.4, 2.5)).toBe(100);
+    expect(displayPercent(Number.NaN, 2)).toBe(200);
+  });
+
+  it("swipeDirection：左滑下一张、右滑上一张，短距或偏竖直不换", () => {
+    expect(swipeDirection(-80, 10)).toBe(1);
+    expect(swipeDirection(80, -10)).toBe(-1);
+    expect(swipeDirection(-40, 0)).toBe(0);
+    expect(swipeDirection(-80, 120)).toBe(0);
+    expect(swipeDirection(Number.NaN, 0)).toBe(0);
   });
 });
 
