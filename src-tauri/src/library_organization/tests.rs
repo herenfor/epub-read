@@ -1,0 +1,1047 @@
+use super::*;
+
+const DEVICE_A: &str = "0a0a0a0a-0000-4000-8000-00000000000a";
+const DEVICE_B: &str = "0b0b0b0b-0000-4000-8000-00000000000b";
+const DEVICE_C: &str = "0c0c0c0c-0000-4000-8000-00000000000c";
+const FOLDER_F: &str = "00000000-0000-4000-8000-0000000000f0";
+const FOLDER_G: &str = "00000000-0000-4000-8000-0000000000f1";
+const FOLDER_X: &str = "00000000-0000-4000-8000-0000000000f2";
+const HASH_H1: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const HASH_H2: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+fn stamp(counter: u64, device_id: &str) -> Stamp {
+    Stamp {
+        counter,
+        device_id: device_id.into(),
+    }
+}
+
+fn reg<T>(value: T, counter: u64, device_id: &str) -> Register<T> {
+    Register {
+        value,
+        stamp: stamp(counter, device_id),
+    }
+}
+
+fn envelope(device_id: &str, counter: u64, state: LibraryOrganization) -> OrganizationEnvelope {
+    OrganizationEnvelope {
+        device_id: device_id.into(),
+        counter,
+        state,
+    }
+}
+
+fn folder(name: &str, counter: u64, device_id: &str) -> FolderState {
+    FolderState {
+        name: reg(name.to_string(), counter, device_id),
+        parent_id: None,
+        deleted: None,
+    }
+}
+
+fn state(
+    folders: Vec<(&str, FolderState)>,
+    books: Vec<(&str, BookOrganization)>,
+) -> LibraryOrganization {
+    LibraryOrganization {
+        schema_version: ORGANIZATION_SCHEMA_VERSION,
+        folders: folders
+            .into_iter()
+            .map(|(id, value)| (id.to_string(), value))
+            .collect(),
+        books: books
+            .into_iter()
+            .map(|(hash, value)| (hash.to_string(), value))
+            .collect(),
+    }
+}
+
+fn book_favorite(value: bool, counter: u64, device_id: &str) -> BookOrganization {
+    BookOrganization {
+        favorite: Some(reg(value, counter, device_id)),
+        folder_id: None,
+    }
+}
+
+fn book_folder(target: Option<&str>, counter: u64, device_id: &str) -> BookOrganization {
+    BookOrganization {
+        favorite: None,
+        folder_id: Some(reg(target.map(str::to_string), counter, device_id)),
+    }
+}
+
+fn known(hashes: &[&str]) -> HashSet<String> {
+    hashes.iter().map(|hash| hash.to_string()).collect()
+}
+
+#[test]
+fn command_json_requires_an_explicit_folder_id_field() {
+    let with_target = format!(
+        r#"{{"type":"moveBooks","contentHashes":["{HASH_H1}"],"folderId":"{FOLDER_F}"}}"#
+    );
+    assert_eq!(
+        serde_json::from_str::<OrganizationCommand>(&with_target).unwrap(),
+        OrganizationCommand::MoveBooks {
+            content_hashes: vec![HASH_H1.into()],
+            folder_id: Some(FOLDER_F.into()),
+        }
+    );
+    let explicit_null =
+        format!(r#"{{"type":"moveBooks","contentHashes":["{HASH_H1}"],"folderId":null}}"#);
+    assert_eq!(
+        serde_json::from_str::<OrganizationCommand>(&explicit_null).unwrap(),
+        OrganizationCommand::MoveBooks {
+            content_hashes: vec![HASH_H1.into()],
+            folder_id: None,
+        }
+    );
+    // A missing field is not the same event as an explicit move to the root.
+    let missing = format!(r#"{{"type":"moveBooks","contentHashes":["{HASH_H1}"]}}"#);
+    assert!(serde_json::from_str::<OrganizationCommand>(&missing).is_err());
+}
+
+#[test]
+fn nested_commands_and_parent_registers_keep_explicit_null_semantics() {
+    let create = format!(r#"{{"type":"createFolder","folderId":"{FOLDER_F}","name":"根"}}"#);
+    assert_eq!(
+        serde_json::from_str::<OrganizationCommand>(&create).unwrap(),
+        OrganizationCommand::CreateFolder {
+            folder_id: FOLDER_F.into(),
+            name: "根".into(),
+            parent_id: None,
+        }
+    );
+    let move_root =
+        format!(r#"{{"type":"moveFolder","folderId":"{FOLDER_F}","parentId":null}}"#);
+    assert_eq!(
+        serde_json::from_str::<OrganizationCommand>(&move_root).unwrap(),
+        OrganizationCommand::MoveFolder {
+            folder_id: FOLDER_F.into(),
+            parent_id: None,
+        }
+    );
+    let missing =
+        format!(r#"{{"type":"moveFolder","folderId":"{FOLDER_F}"}}"#);
+    assert!(serde_json::from_str::<OrganizationCommand>(&missing).is_err());
+
+    let register = format!(
+        r#"{{"value":null,"stamp":{{"counter":4,"deviceId":"{DEVICE_A}"}}}}"#
+    );
+    let folder: FolderState = serde_json::from_str(&format!(
+        r#"{{"name":{{"value":"根","stamp":{{"counter":1,"deviceId":"{DEVICE_A}"}}}},"parentId":{register}}}"#
+    ))
+    .unwrap();
+    assert_eq!(folder.parent_id.unwrap().value, None);
+    assert!(serde_json::from_str::<FolderState>(&format!(
+        r#"{{"name":{{"value":"根","stamp":{{"counter":1,"deviceId":"{DEVICE_A}"}}}},"parentId":null}}"#
+    ))
+    .is_err());
+}
+
+#[test]
+fn legacy_parent_shape_and_future_versions_are_gated_at_validation() {
+    let mut legacy = state(vec![(FOLDER_F, folder("旧根", 1, DEVICE_A))], vec![]);
+    legacy.schema_version = ORGANIZATION_LEGACY_SCHEMA_VERSION;
+    assert!(validate_organization(&legacy).is_ok());
+    let normalized = normalize_organization(legacy.clone()).unwrap();
+    assert_eq!(normalized.schema_version, ORGANIZATION_SCHEMA_VERSION);
+    assert_eq!(normalized.folders[FOLDER_F].parent_id, None);
+
+    legacy.folders.get_mut(FOLDER_F).unwrap().parent_id =
+        Some(reg(Some(FOLDER_G.to_string()), 2, DEVICE_A));
+    assert!(validate_organization(&legacy).is_err());
+
+    let future = OrganizationEnvelope {
+        device_id: DEVICE_A.into(),
+        counter: 0,
+        state: frontend_future_state(),
+    };
+    assert!(validate_envelope(&future).is_err());
+}
+
+fn frontend_future_state() -> LibraryOrganization {
+    let mut state = state(vec![(FOLDER_F, folder("未来", 1, DEVICE_A))], vec![]);
+    state.schema_version = 3;
+    state
+}
+
+#[test]
+fn register_json_requires_a_value_but_keeps_an_explicit_null() {
+    let explicit_null =
+        format!(r#"{{"value":null,"stamp":{{"counter":4,"deviceId":"{DEVICE_A}"}}}}"#);
+    let register: Register<Option<String>> = serde_json::from_str(&explicit_null).unwrap();
+    assert_eq!(register.value, None);
+    assert_eq!(register.stamp, stamp(4, DEVICE_A));
+    // A stamped register without a value must never act as an event.
+    let missing = format!(r#"{{"stamp":{{"counter":4,"deviceId":"{DEVICE_A}"}}}}"#);
+    assert!(serde_json::from_str::<Register<Option<String>>>(&missing).is_err());
+    assert!(serde_json::from_str::<Register<bool>>(&missing).is_err());
+}
+
+#[test]
+fn optional_objects_reject_json_null_and_still_allow_omission() {
+    let name = format!(r#"{{"value":"科幻","stamp":{{"counter":1,"deviceId":"{DEVICE_A}"}}}}"#);
+    // Outer null would silently drop a deletion marker, favorite or folder.
+    assert!(serde_json::from_str::<FolderState>(&format!(
+        r#"{{"name":{name},"deleted":null}}"#
+    ))
+    .is_err());
+    let folder: FolderState = serde_json::from_str(&format!(r#"{{"name":{name}}}"#)).unwrap();
+    assert_eq!(folder.deleted, None);
+    assert!(serde_json::from_str::<BookOrganization>(r#"{"favorite":null}"#).is_err());
+    assert!(serde_json::from_str::<BookOrganization>(r#"{"folderId":null}"#).is_err());
+    let empty: BookOrganization = serde_json::from_str("{}").unwrap();
+    assert_eq!(
+        empty,
+        BookOrganization {
+            favorite: None,
+            folder_id: None,
+        }
+    );
+    // The inner register value may still be an explicit null (move to root).
+    let root = format!(
+        r#"{{"folderId":{{"value":null,"stamp":{{"counter":7,"deviceId":"{DEVICE_A}"}}}}}}"#
+    );
+    let book: BookOrganization = serde_json::from_str(&root).unwrap();
+    assert_eq!(book.folder_id.unwrap().value, None);
+    // ... and `false` is a real value, not an omitted field.
+    let unfavorite = format!(
+        r#"{{"favorite":{{"value":false,"stamp":{{"counter":2,"deviceId":"{DEVICE_A}"}}}}}}"#
+    );
+    let book: BookOrganization = serde_json::from_str(&unfavorite).unwrap();
+    assert_eq!(book.favorite.unwrap().value, false);
+}
+
+#[test]
+fn merge_keeps_favorite_and_folder_as_independent_fields() {
+    let favorite = state(vec![], vec![(HASH_H1, book_favorite(true, 2, DEVICE_A))]);
+    let moved = state(
+        vec![(FOLDER_F, folder("F", 1, DEVICE_B))],
+        vec![(HASH_H1, book_folder(Some(FOLDER_F), 2, DEVICE_B))],
+    );
+    let forward = merge_organization(&favorite, &moved).unwrap();
+    let backward = merge_organization(&moved, &favorite).unwrap();
+    assert_eq!(forward, backward);
+    assert!(is_favorite(&forward, HASH_H1));
+    assert_eq!(effective_folder_id(&forward, HASH_H1), Some(FOLDER_F));
+}
+
+#[test]
+fn simultaneous_favorite_events_resolve_by_device_and_old_import_cannot_return() {
+    let older = state(vec![], vec![(HASH_H1, book_favorite(false, 5, DEVICE_B))]);
+    let newer = state(vec![], vec![(HASH_H1, book_favorite(true, 5, DEVICE_A))]);
+    let merged = merge_organization(&newer, &older).unwrap();
+    assert!(!is_favorite(&merged, HASH_H1));
+    // A stale snapshot from another device must not restore the old value.
+    let stale = state(vec![], vec![(HASH_H1, book_favorite(true, 4, DEVICE_B))]);
+    let merged_again = merge_organization(&merged, &stale).unwrap();
+    assert!(!is_favorite(&merged_again, HASH_H1));
+}
+
+#[test]
+fn deleted_folder_is_hidden_but_keeps_raw_reference_and_later_moves_work() {
+    let renamed = state(vec![(FOLDER_F, folder("新名", 8, DEVICE_A))], vec![]);
+    let mut tombstoned = folder("旧名", 2, DEVICE_B);
+    tombstoned.deleted = Some(stamp(3, DEVICE_B));
+    let deleted = state(vec![(FOLDER_F, tombstoned)], vec![]);
+    let moved = state(
+        vec![],
+        vec![(HASH_H1, book_folder(Some(FOLDER_F), 10, DEVICE_A))],
+    );
+    let merged =
+        merge_organization(&merge_organization(&renamed, &deleted).unwrap(), &moved).unwrap();
+    let stored = &merged.folders[FOLDER_F];
+    assert_eq!(stored.name.value, "新名");
+    assert_eq!(stored.deleted, Some(stamp(3, DEVICE_B)));
+    // Projection hides it, but the raw reference stays for the merge.
+    assert_eq!(effective_folder_id(&merged, HASH_H1), None);
+    assert_eq!(
+        merged.books[HASH_H1].folder_id.as_ref().unwrap().value,
+        Some(FOLDER_F.to_string())
+    );
+    // Moving to a live folder afterwards still succeeds.
+    let with_target = state(vec![(FOLDER_G, folder("G", 1, DEVICE_A))], vec![]);
+    let merged = merge_organization(&merged, &with_target).unwrap();
+    let moved = apply_command(
+        &envelope(DEVICE_A, 10, merged),
+        &OrganizationCommand::MoveBooks {
+            content_hashes: vec![HASH_H1.into()],
+            folder_id: Some(FOLDER_G.into()),
+        },
+        &known(&[HASH_H1]),
+    )
+    .unwrap();
+    assert_eq!(
+        moved.state.books[HASH_H1].folder_id.as_ref().unwrap().stamp,
+        stamp(11, DEVICE_A)
+    );
+    assert_eq!(effective_folder_id(&moved.state, HASH_H1), Some(FOLDER_G));
+}
+
+#[test]
+fn unknown_folder_reference_projects_to_root_and_converges_either_order() {
+    let moved_first = state(
+        vec![],
+        vec![(HASH_H1, book_folder(Some(FOLDER_F), 3, DEVICE_A))],
+    );
+    assert_eq!(effective_folder_id(&moved_first, HASH_H1), None);
+    let folder_later = state(vec![(FOLDER_F, folder("F", 5, DEVICE_A))], vec![]);
+    let forward = merge_organization(&moved_first, &folder_later).unwrap();
+    let backward = merge_organization(&folder_later, &moved_first).unwrap();
+    assert_eq!(forward, backward);
+    assert_eq!(effective_folder_id(&forward, HASH_H1), Some(FOLDER_F));
+}
+
+#[test]
+fn import_advances_local_counter_without_taking_over_device_id() {
+    let local = envelope(
+        DEVICE_A,
+        3,
+        state(vec![], vec![(HASH_H1, book_favorite(false, 2, DEVICE_A))]),
+    );
+    let incoming = state(vec![], vec![(HASH_H1, book_favorite(true, 9, DEVICE_B))]);
+    let merged = merge_into_envelope(&local, &incoming).unwrap();
+    assert_eq!(merged.device_id, DEVICE_A);
+    assert_eq!(merged.counter, 9);
+    assert!(is_favorite(&merged.state, HASH_H1));
+    // Import itself makes no event.
+    assert_eq!(merge_into_envelope(&merged, &incoming).unwrap(), merged);
+    let next = apply_command(
+        &merged,
+        &OrganizationCommand::SetFavorite {
+            content_hashes: vec![HASH_H1.into()],
+            value: false,
+        },
+        &known(&[HASH_H1]),
+    )
+    .unwrap();
+    let register = next.state.books[HASH_H1].favorite.as_ref().unwrap();
+    assert_eq!(register.value, false);
+    assert_eq!(register.stamp, stamp(10, DEVICE_A));
+}
+
+#[test]
+fn same_stamp_different_value_is_a_collision_while_shared_stamps_across_fields_are_legal() {
+    let favorite_true = state(vec![], vec![(HASH_H1, book_favorite(true, 5, DEVICE_A))]);
+    let favorite_false = state(vec![], vec![(HASH_H1, book_favorite(false, 5, DEVICE_A))]);
+    assert!(merge_organization(&favorite_true, &favorite_false).is_err());
+    assert!(merge_organization(&favorite_false, &favorite_true).is_err());
+    // Sharing one stamp across favorite and folderId is not a conflict, and a
+    // different value on a different field must not be treated as one either.
+    let folder_f = state(
+        vec![],
+        vec![(HASH_H1, book_folder(Some(FOLDER_F), 5, DEVICE_A))],
+    );
+    let folder_null = state(vec![], vec![(HASH_H1, book_folder(None, 5, DEVICE_A))]);
+    let shared = merge_organization(&favorite_true, &folder_f).unwrap();
+    assert_eq!(
+        shared.books[HASH_H1].favorite.as_ref().unwrap().stamp,
+        shared.books[HASH_H1].folder_id.as_ref().unwrap().stamp
+    );
+    assert!(merge_organization(&favorite_false, &folder_null).is_ok());
+}
+
+#[test]
+fn three_snapshots_merge_commutatively_associatively_and_idempotently() {
+    let a = state(
+        vec![(FOLDER_F, folder("F", 1, DEVICE_A))],
+        vec![(HASH_H1, book_favorite(true, 2, DEVICE_A))],
+    );
+    let b = state(
+        vec![(FOLDER_F, folder("F-重命名", 5, DEVICE_B))],
+        vec![
+            (HASH_H1, book_folder(Some(FOLDER_F), 3, DEVICE_B)),
+            (HASH_H2, book_favorite(true, 4, DEVICE_B)),
+        ],
+    );
+    let c = state(
+        vec![(FOLDER_G, folder("G", 2, DEVICE_C))],
+        vec![
+            (HASH_H1, book_favorite(false, 1, DEVICE_C)),
+            (HASH_H2, book_folder(Some(FOLDER_G), 6, DEVICE_C)),
+        ],
+    );
+    let ab = merge_organization(&a, &b).unwrap();
+    let forward = merge_organization(&ab, &c).unwrap();
+    let middle = merge_organization(&merge_organization(&a, &c).unwrap(), &b).unwrap();
+    let backward = merge_organization(&a, &merge_organization(&b, &c).unwrap()).unwrap();
+    assert_eq!(forward, middle);
+    assert_eq!(middle, backward);
+    assert_eq!(
+        merge_organization(&a, &b).unwrap(),
+        merge_organization(&b, &a).unwrap()
+    );
+    assert_eq!(merge_organization(&a, &a).unwrap(), a);
+    // Repeated imports neither add folders nor duplicate events.
+    let again = merge_organization(&forward, &forward).unwrap();
+    assert_eq!(again, forward);
+    assert_eq!(again.folders.len(), 2);
+    assert_eq!(again.books.len(), 2);
+}
+
+#[test]
+fn batch_commands_share_one_stamp_and_keep_explicit_false_and_null() {
+    let state = state(vec![(FOLDER_F, folder("F", 1, DEVICE_A))], vec![]);
+    let start = envelope(DEVICE_A, 1, state);
+    let favorited = apply_command(
+        &start,
+        &OrganizationCommand::SetFavorite {
+            content_hashes: vec![HASH_H1.into(), HASH_H2.into(), HASH_H1.into()],
+            value: true,
+        },
+        &known(&[HASH_H1, HASH_H2]),
+    )
+    .unwrap();
+    assert_eq!(favorited.counter, 2);
+    for hash in [HASH_H1, HASH_H2] {
+        let register = favorited.state.books[hash].favorite.as_ref().unwrap();
+        assert!(register.value);
+        assert_eq!(register.stamp, stamp(2, DEVICE_A));
+    }
+    // Explicit "取消收藏" persists a false register instead of dropping it.
+    let unfavorited = apply_command(
+        &favorited,
+        &OrganizationCommand::SetFavorite {
+            content_hashes: vec![HASH_H1.into()],
+            value: false,
+        },
+        &known(&[HASH_H1, HASH_H2]),
+    )
+    .unwrap();
+    let register = unfavorited.state.books[HASH_H1].favorite.as_ref().unwrap();
+    assert!(!register.value);
+    assert_eq!(register.stamp, stamp(3, DEVICE_A));
+    // Explicit "移出到未归类" persists a null register.
+    let unclassified = apply_command(
+        &unfavorited,
+        &OrganizationCommand::MoveBooks {
+            content_hashes: vec![HASH_H2.into()],
+            folder_id: None,
+        },
+        &known(&[HASH_H1, HASH_H2]),
+    )
+    .unwrap();
+    let register = unclassified.state.books[HASH_H2]
+        .folder_id
+        .as_ref()
+        .unwrap();
+    assert_eq!(register.value, None);
+    assert_eq!(register.stamp, stamp(4, DEVICE_A));
+    let json = serde_json::to_string(&unclassified.state).unwrap();
+    assert!(json.contains(r#""value":false"#));
+    assert!(json.contains(r#""value":null"#));
+}
+
+#[test]
+fn rejected_batches_leave_the_previous_envelope_untouched() {
+    let state = state(
+        vec![(FOLDER_F, folder("F", 1, DEVICE_A))],
+        vec![(HASH_H1, book_favorite(true, 2, DEVICE_A))],
+    );
+    let start = envelope(DEVICE_A, 2, state);
+    let before = start.clone();
+    let missing_book = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+    assert!(apply_command(
+        &start,
+        &OrganizationCommand::SetFavorite {
+            content_hashes: vec![HASH_H1.into(), missing_book.into()],
+            value: false,
+        },
+        &known(&[HASH_H1]),
+    )
+    .is_err());
+    assert!(apply_command(
+        &start,
+        &OrganizationCommand::MoveBooks {
+            content_hashes: vec![HASH_H1.into()],
+            folder_id: Some(FOLDER_X.into()),
+        },
+        &known(&[HASH_H1]),
+    )
+    .is_err());
+    // Other commands do not depend on book records and still work.
+    assert!(apply_command(
+        &start,
+        &OrganizationCommand::MoveBooks {
+            content_hashes: vec![HASH_H1.into()],
+            folder_id: Some(FOLDER_F.into()),
+        },
+        &known(&[HASH_H1]),
+    )
+    .is_ok());
+    // Empty array is an explicit no-op with no new stamp, even when the
+    // (unused) target is unknown.
+    let noop = apply_command(
+        &start,
+        &OrganizationCommand::SetFavorite {
+            content_hashes: vec![],
+            value: true,
+        },
+        &known(&[HASH_H1]),
+    )
+    .unwrap();
+    assert_eq!(noop, before);
+    let noop_move = apply_command(
+        &start,
+        &OrganizationCommand::MoveBooks {
+            content_hashes: vec![],
+            folder_id: Some(FOLDER_X.into()),
+        },
+        &known(&[HASH_H1]),
+    )
+    .unwrap();
+    assert_eq!(noop_move, before);
+    assert_eq!(start, before);
+}
+
+#[test]
+fn nested_folder_projection_breaks_cycles_and_promotes_deleted_children() {
+    let f1 = "00000000-0000-4000-8000-000000000101";
+    let f2 = "00000000-0000-4000-8000-000000000102";
+    let f3 = "00000000-0000-4000-8000-000000000103";
+    let with_parent = |name: &str, parent: Option<&str>, counter: u64| FolderState {
+        name: reg(name.to_string(), counter, DEVICE_A),
+        parent_id: Some(reg(parent.map(str::to_string), counter, DEVICE_A)),
+        deleted: None,
+    };
+
+    // f1 < f2, so the cycle is broken at f1 even though f2 is visited first.
+    let cycle = state(
+        vec![
+            (f2, with_parent("二", Some(f1), 2)),
+            (f1, with_parent("一", Some(f2), 1)),
+            (f3, with_parent("三", Some(f1), 3)),
+        ],
+        vec![],
+    );
+    assert_eq!(effective_folder_parent(&cycle, f1), None);
+    assert_eq!(effective_folder_parent(&cycle, f2), Some(f1.to_string()));
+    assert_eq!(effective_folder_parent(&cycle, f3), Some(f1.to_string()));
+    assert_eq!(effective_folder_depth(&cycle, f2), Some(2));
+
+    let mut promoted = state(
+        vec![
+            (f1, with_parent("一", None, 1)),
+            (f2, with_parent("二", Some(f1), 2)),
+            (f3, with_parent("三", Some(f2), 3)),
+        ],
+        vec![(HASH_H1, book_folder(Some(f2), 5, DEVICE_A))],
+    );
+    promoted.folders.get_mut(f2).unwrap().deleted = Some(stamp(4, DEVICE_A));
+    assert_eq!(effective_folder_id(&promoted, HASH_H1), Some(f1));
+    assert_eq!(effective_folder_parent(&promoted, f3), Some(f1.to_string()));
+    assert_eq!(effective_folder_ancestors(&promoted, f3), vec![f1.to_string()]);
+    assert_eq!(
+        promoted.books[HASH_H1]
+            .folder_id
+            .as_ref()
+            .unwrap()
+            .value
+            .as_deref(),
+        Some(f2)
+    );
+
+    let mut deleted_loop = state(
+        vec![(f1, with_parent("环", Some(f1), 1))],
+        vec![(HASH_H1, book_folder(Some(f1), 3, DEVICE_A))],
+    );
+    deleted_loop.folders.get_mut(f1).unwrap().deleted = Some(stamp(2, DEVICE_A));
+    assert_eq!(effective_folder_id(&deleted_loop, HASH_H1), None);
+}
+
+#[test]
+fn parent_registers_merge_by_stamp_and_advance_the_local_clock() {
+    let a = state(
+        vec![(FOLDER_F, FolderState {
+            name: reg("A".into(), 1, DEVICE_A),
+            parent_id: Some(reg(None, 5, DEVICE_A)),
+            deleted: None,
+        })],
+        vec![],
+    );
+    let b = state(
+        vec![(FOLDER_F, FolderState {
+            name: reg("A".into(), 1, DEVICE_A),
+            parent_id: Some(reg(Some(FOLDER_G.to_string()), 5, DEVICE_A)),
+            deleted: None,
+        })],
+        vec![],
+    );
+    assert!(merge_organization(&a, &b).is_err());
+    let merged = merge_organization(&a, &state(vec![(FOLDER_G, folder("G", 9, DEVICE_A))], vec![])).unwrap();
+    assert_eq!(merged.folders[FOLDER_F].parent_id.as_ref().unwrap().value, None);
+    assert_eq!(max_observed_counter(&merged), 9);
+}
+
+#[test]
+fn nested_create_move_enforce_five_levels_and_no_cycles() {
+    let ids = [
+        "00000000-0000-4000-8000-000000000201",
+        "00000000-0000-4000-8000-000000000202",
+        "00000000-0000-4000-8000-000000000203",
+        "00000000-0000-4000-8000-000000000204",
+        "00000000-0000-4000-8000-000000000205",
+        "00000000-0000-4000-8000-000000000206",
+    ];
+    let names = ["一", "二", "三", "四", "五", "六"];
+    let mut envelope = envelope(DEVICE_A, 0, empty_organization());
+    for index in 0..5 {
+        envelope = apply_command(
+            &envelope,
+            &OrganizationCommand::CreateFolder {
+                folder_id: ids[index].into(),
+                name: names[index].into(),
+                parent_id: (index > 0).then(|| ids[index - 1].to_string()),
+            },
+            &HashSet::new(),
+        )
+        .unwrap();
+    }
+    assert_eq!(
+        effective_folder_ancestors(&envelope.state, ids[4]),
+        ids[..4].iter().map(|id| id.to_string()).collect::<Vec<_>>()
+    );
+    assert_eq!(effective_folder_depth(&envelope.state, ids[4]), Some(5));
+    assert_eq!(
+        effective_folder_children(&envelope.state, Some(ids[0])),
+        vec![ids[1].to_string()]
+    );
+    assert_eq!(
+        effective_folder_descendants(&envelope.state, ids[0]),
+        ids[1..5].iter().map(|id| id.to_string()).collect::<Vec<_>>()
+    );
+
+    let sixth = OrganizationCommand::CreateFolder {
+        folder_id: ids[5].into(),
+        name: names[5].into(),
+        parent_id: Some(ids[4].into()),
+    };
+    assert!(apply_command(&envelope, &sixth, &HashSet::new())
+        .unwrap_err()
+        .contains("不能超过 5 层"));
+
+    envelope = apply_command(
+        &envelope,
+        &OrganizationCommand::MoveFolder {
+            folder_id: ids[4].into(),
+            parent_id: None,
+        },
+        &HashSet::new(),
+    )
+    .unwrap();
+    assert_eq!(effective_folder_depth(&envelope.state, ids[4]), Some(1));
+    let cycle = OrganizationCommand::MoveFolder {
+        folder_id: ids[0].into(),
+        parent_id: Some(ids[3].into()),
+    };
+    assert!(apply_command(&envelope, &cycle, &HashSet::new())
+        .unwrap_err()
+        .contains("形成环"));
+    let self_parent = OrganizationCommand::MoveFolder {
+        folder_id: ids[0].into(),
+        parent_id: Some(ids[0].into()),
+    };
+    assert!(apply_command(&envelope, &self_parent, &HashSet::new())
+        .unwrap_err()
+        .contains("自身"));
+}
+
+#[test]
+fn nested_depth_clamps_for_remote_data_but_keeps_raw_parents() {
+    let ids = [
+        "00000000-0000-4000-8000-000000000301",
+        "00000000-0000-4000-8000-000000000302",
+        "00000000-0000-4000-8000-000000000303",
+        "00000000-0000-4000-8000-000000000304",
+        "00000000-0000-4000-8000-000000000305",
+        "00000000-0000-4000-8000-000000000306",
+        "00000000-0000-4000-8000-000000000307",
+    ];
+    let folders = ids
+        .iter()
+        .enumerate()
+        .map(|(index, id)| {
+            (
+                *id,
+                FolderState {
+                    name: reg(format!("夹{index}"), index as u64 + 1, DEVICE_A),
+                    parent_id: Some(reg(
+                        (index > 0).then(|| ids[index - 1].to_string()),
+                        index as u64 + 1,
+                        DEVICE_A,
+                    )),
+                    deleted: None,
+                },
+            )
+        })
+        .collect();
+    let deep = state(folders, vec![]);
+    for id in ids {
+        let depth = effective_folder_depth(&deep, id).unwrap();
+        assert!(depth <= MAX_FOLDER_DEPTH);
+        assert_eq!(effective_folder_ancestors(&deep, id).len() + 1, depth);
+    }
+    assert_eq!(effective_folder_depth(&deep, ids[5]), Some(5));
+    assert_eq!(effective_folder_depth(&deep, ids[6]), Some(5));
+    assert_eq!(effective_folder_parent(&deep, ids[5]), Some(ids[3].into()));
+    assert_eq!(effective_folder_parent(&deep, ids[6]), Some(ids[3].into()));
+    assert_eq!(
+        effective_folder_ancestors(&deep, ids[5]),
+        ids[..4].iter().map(|id| id.to_string()).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        effective_folder_children(&deep, Some(ids[3])),
+        ids[4..].iter().map(|id| id.to_string()).collect::<Vec<_>>()
+    );
+    // Raw registers and original fifth-level nodes are not rewritten.
+    assert_eq!(
+        deep.folders[ids[6]]
+            .parent_id
+            .as_ref()
+            .unwrap()
+            .value
+            .as_deref(),
+        Some(ids[5])
+    );
+    assert_eq!(
+        deep.folders[ids[4]]
+            .parent_id
+            .as_ref()
+            .unwrap()
+            .value
+            .as_deref(),
+        Some(ids[3])
+    );
+}
+
+#[test]
+fn two_independently_legal_moves_merge_without_creating_a_sixth_level() {
+    let ids = [
+        "00000000-0000-4000-8000-000000000401",
+        "00000000-0000-4000-8000-000000000402",
+        "00000000-0000-4000-8000-000000000403",
+        "00000000-0000-4000-8000-000000000404",
+        "00000000-0000-4000-8000-000000000405",
+        "00000000-0000-4000-8000-000000000406",
+    ];
+    let [a, b, c, d, x, y] = ids;
+    let base = state(
+        vec![
+            (a, FolderState {
+                name: reg("a".into(), 1, DEVICE_A),
+                parent_id: Some(reg(None, 1, DEVICE_A)),
+                deleted: None,
+            }),
+            (b, FolderState {
+                name: reg("b".into(), 1, DEVICE_A),
+                parent_id: Some(reg(Some(a.into()), 1, DEVICE_A)),
+                deleted: None,
+            }),
+            (c, FolderState {
+                name: reg("c".into(), 1, DEVICE_A),
+                parent_id: Some(reg(Some(b.into()), 1, DEVICE_A)),
+                deleted: None,
+            }),
+            (d, FolderState {
+                name: reg("d".into(), 1, DEVICE_A),
+                parent_id: Some(reg(Some(c.into()), 1, DEVICE_A)),
+                deleted: None,
+            }),
+            (x, FolderState {
+                name: reg("x".into(), 1, DEVICE_A),
+                parent_id: Some(reg(None, 1, DEVICE_A)),
+                deleted: None,
+            }),
+            (y, FolderState {
+                name: reg("y".into(), 1, DEVICE_A),
+                parent_id: Some(reg(None, 1, DEVICE_A)),
+                deleted: None,
+            }),
+        ],
+        vec![],
+    );
+    let left = apply_command(
+        &envelope(DEVICE_A, 1, base.clone()),
+        &OrganizationCommand::MoveFolder {
+            folder_id: a.into(),
+            parent_id: Some(x.into()),
+        },
+        &HashSet::new(),
+    )
+    .unwrap()
+    .state;
+    let right = apply_command(
+        &envelope(DEVICE_B, 1, base),
+        &OrganizationCommand::MoveFolder {
+            folder_id: x.into(),
+            parent_id: Some(y.into()),
+        },
+        &HashSet::new(),
+    )
+    .unwrap()
+    .state;
+    assert_eq!(effective_folder_ancestors(&left, d).len(), 4);
+    assert_eq!(effective_folder_ancestors(&right, d).len(), 3);
+
+    let merged = merge_organization(&left, &right).unwrap();
+    for id in ids {
+        let depth = effective_folder_depth(&merged, id).unwrap();
+        assert!(depth <= MAX_FOLDER_DEPTH);
+        assert_eq!(effective_folder_ancestors(&merged, id).len() + 1, depth);
+    }
+    assert_eq!(effective_folder_depth(&merged, d), Some(5));
+    assert_eq!(
+        merged.folders[d].parent_id.as_ref().unwrap().value.as_deref(),
+        Some(c)
+    );
+    assert_eq!(
+        merged.folders[x].parent_id.as_ref().unwrap().value.as_deref(),
+        Some(y)
+    );
+}
+
+#[test]
+fn folder_lifecycle_trims_names_and_keeps_permanent_tombstones() {
+    let created = apply_command(
+        &envelope(DEVICE_A, 0, empty_organization()),
+        &OrganizationCommand::CreateFolder {
+            folder_id: FOLDER_F.into(),
+            name: "  科幻  ".into(),
+            parent_id: None,
+        },
+        &HashSet::new(),
+    )
+    .unwrap();
+    assert_eq!(created.state.folders[FOLDER_F].name.value, "科幻");
+    assert_eq!(
+        created.state.folders[FOLDER_F].name.stamp,
+        stamp(1, DEVICE_A)
+    );
+    assert_eq!(
+        created.state.folders[FOLDER_F].parent_id.as_ref().unwrap().value,
+        None
+    );
+    assert_eq!(created.counter, 1);
+    // A used UUID cannot be created again, live or tombstoned.
+    assert!(apply_command(
+        &created,
+        &OrganizationCommand::CreateFolder {
+            folder_id: FOLDER_F.into(),
+            name: "另一个".into(),
+            parent_id: None,
+        },
+        &HashSet::new(),
+    )
+    .is_err());
+    let renamed = apply_command(
+        &created,
+        &OrganizationCommand::RenameFolder {
+            folder_id: FOLDER_F.into(),
+            name: "改名".into(),
+        },
+        &HashSet::new(),
+    )
+    .unwrap();
+    assert_eq!(renamed.state.folders[FOLDER_F].name.value, "改名");
+    let deleted = apply_command(
+        &renamed,
+        &OrganizationCommand::DeleteFolder {
+            folder_id: FOLDER_F.into(),
+        },
+        &HashSet::new(),
+    )
+    .unwrap();
+    // Deleting keeps the name register and only adds the tombstone.
+    assert_eq!(deleted.state.folders[FOLDER_F].name.value, "改名");
+    assert_eq!(
+        deleted.state.folders[FOLDER_F].name.stamp,
+        renamed.state.folders[FOLDER_F].name.stamp
+    );
+    assert_eq!(
+        deleted.state.folders[FOLDER_F].deleted,
+        Some(stamp(3, DEVICE_A))
+    );
+    // Deleting again is a no-op; creating or renaming the tombstoned UUID fails.
+    let deleted_again = apply_command(
+        &deleted,
+        &OrganizationCommand::DeleteFolder {
+            folder_id: FOLDER_F.into(),
+        },
+        &HashSet::new(),
+    )
+    .unwrap();
+    assert_eq!(deleted_again, deleted);
+    assert!(apply_command(
+        &deleted,
+        &OrganizationCommand::CreateFolder {
+            folder_id: FOLDER_F.into(),
+            name: "复活".into(),
+            parent_id: None,
+        },
+        &HashSet::new(),
+    )
+    .is_err());
+    assert!(apply_command(
+        &deleted,
+        &OrganizationCommand::RenameFolder {
+            folder_id: FOLDER_F.into(),
+            name: "复活".into(),
+        },
+        &HashSet::new(),
+    )
+    .is_err());
+    assert!(apply_command(
+        &deleted,
+        &OrganizationCommand::DeleteFolder {
+            folder_id: FOLDER_X.into(),
+        },
+        &HashSet::new(),
+    )
+    .is_err());
+}
+
+#[test]
+fn folder_name_validation_uses_javascript_trim_and_code_points() {
+    assert_eq!(js_trim("\u{FEFF}名\u{FEFF}"), "名");
+    assert_eq!(js_trim("\u{0085}名\u{0085}"), "\u{0085}名\u{0085}");
+    assert_eq!(js_trim("\t\r\n 名 \u{3000}\u{00A0}"), "名");
+    assert_eq!(normalize_folder_name("  科幻  "), Ok("科幻".to_string()));
+    assert!(normalize_folder_name("").is_err());
+    assert!(normalize_folder_name(" \u{FEFF}\t").is_err());
+    let forty = "😀".repeat(40);
+    assert_eq!(normalize_folder_name(&forty), Ok(forty.clone()));
+    assert!(normalize_folder_name(&"😀".repeat(41)).is_err());
+    assert!(valid_folder_name(&forty));
+    assert!(!valid_folder_name(" 名"));
+    assert!(!valid_folder_name("名 "));
+}
+
+#[test]
+fn command_and_state_json_are_camel_case_and_tagged() {
+    let command = OrganizationCommand::MoveBooks {
+        content_hashes: vec![HASH_H1.into()],
+        folder_id: None,
+    };
+    assert_eq!(
+        serde_json::to_string(&command).unwrap(),
+        format!(r#"{{"type":"moveBooks","contentHashes":["{HASH_H1}"],"folderId":null}}"#)
+    );
+    assert_eq!(
+        serde_json::from_str::<OrganizationCommand>(&serde_json::to_string(&command).unwrap())
+            .unwrap(),
+        command
+    );
+    assert_eq!(
+        serde_json::to_string(&OrganizationCommand::CreateFolder {
+            folder_id: FOLDER_F.into(),
+            name: "科幻".into(),
+            parent_id: None,
+        })
+        .unwrap(),
+        format!(r#"{{"type":"createFolder","folderId":"{FOLDER_F}","name":"科幻"}}"#)
+    );
+    assert_eq!(
+        serde_json::to_string(&OrganizationCommand::SetFavorite {
+            content_hashes: vec![HASH_H1.into()],
+            value: true,
+        })
+        .unwrap(),
+        format!(r#"{{"type":"setFavorite","contentHashes":["{HASH_H1}"],"value":true}}"#)
+    );
+    assert_eq!(
+        serde_json::to_string(&OrganizationCommand::DeleteFolder {
+            folder_id: FOLDER_F.into(),
+        })
+        .unwrap(),
+        format!(r#"{{"type":"deleteFolder","folderId":"{FOLDER_F}"}}"#)
+    );
+    let envelope = envelope(
+        DEVICE_A,
+        4,
+        state(
+            vec![(FOLDER_F, folder("科幻", 1, DEVICE_A))],
+            vec![(
+                HASH_H1,
+                BookOrganization {
+                    favorite: Some(reg(false, 2, DEVICE_A)),
+                    folder_id: Some(reg(None, 3, DEVICE_A)),
+                },
+            )],
+        ),
+    );
+    let json = serde_json::to_string(&envelope).unwrap();
+    assert_eq!(
+        json,
+        format!(
+            r#"{{"deviceId":"{DEVICE_A}","counter":4,"state":{{"schemaVersion":2,"folders":{{"{FOLDER_F}":{{"name":{{"value":"科幻","stamp":{{"counter":1,"deviceId":"{DEVICE_A}"}}}}}}}},"books":{{"{HASH_H1}":{{"favorite":{{"value":false,"stamp":{{"counter":2,"deviceId":"{DEVICE_A}"}}}},"folderId":{{"value":null,"stamp":{{"counter":3,"deviceId":"{DEVICE_A}"}}}}}}}}}}}}"#
+        )
+    );
+    assert_eq!(
+        serde_json::from_str::<OrganizationEnvelope>(&json).unwrap(),
+        envelope
+    );
+    // Deleted markers are optional on the wire and omitted when absent.
+    assert!(!json.contains("deleted"));
+}
+
+#[test]
+fn validation_rejects_invalid_identity_hash_clock_and_names() {
+    let valid = state(
+        vec![(FOLDER_F, folder("科幻", 1, DEVICE_A))],
+        vec![(
+            HASH_H1,
+            BookOrganization {
+                favorite: Some(reg(true, 2, DEVICE_A)),
+                folder_id: Some(reg(Some(FOLDER_F.to_string()), 3, DEVICE_A)),
+            },
+        )],
+    );
+    assert!(validate_organization(&valid).is_ok());
+    assert!(validate_envelope(&envelope(DEVICE_A, 3, valid.clone())).is_ok());
+
+    let mut wrong_version = valid.clone();
+    wrong_version.schema_version = 3;
+    assert!(validate_organization(&wrong_version).is_err());
+
+    let uppercase_folder = state(
+        vec![(FOLDER_F.to_uppercase().as_str(), folder("F", 1, DEVICE_A))],
+        vec![],
+    );
+    assert!(validate_organization(&uppercase_folder).is_err());
+
+    let bad_hash = state(
+        vec![],
+        vec![("not-a-hash", book_favorite(true, 1, DEVICE_A))],
+    );
+    assert!(validate_organization(&bad_hash).is_err());
+
+    let zero_clock = state(vec![], vec![(HASH_H1, book_favorite(true, 0, DEVICE_A))]);
+    assert!(validate_organization(&zero_clock).is_err());
+
+    let untrimmed = state(vec![(FOLDER_F, folder(" F", 1, DEVICE_A))], vec![]);
+    assert!(validate_organization(&untrimmed).is_err());
+
+    let bad_target = state(
+        vec![],
+        vec![(HASH_H1, book_folder(Some("not-a-uuid"), 1, DEVICE_A))],
+    );
+    assert!(validate_organization(&bad_target).is_err());
+
+    assert!(validate_envelope(&envelope("NOT-A-UUID", 0, empty_organization())).is_err());
+    assert!(validate_envelope(&envelope(
+        DEVICE_A,
+        MAX_SAFE_COUNTER + 1,
+        empty_organization()
+    ))
+    .is_err());
+}
+
+#[test]
+fn clock_exhaustion_is_reported_without_overflow() {
+    assert!(next_stamp(&envelope(DEVICE_A, MAX_SAFE_COUNTER, empty_organization())).is_err());
+    let observed_at_limit = state(
+        vec![],
+        vec![(HASH_H1, book_favorite(true, MAX_SAFE_COUNTER, DEVICE_B))],
+    );
+    assert!(next_stamp(&envelope(DEVICE_A, 0, observed_at_limit)).is_err());
+}
