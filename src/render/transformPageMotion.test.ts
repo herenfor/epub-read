@@ -304,6 +304,7 @@ describe("transform page motion driver", () => {
     await Promise.resolve();
     expect(driver.read().position).toBe(400);
     expect(driver.active).toBe(true);
+    expect(driver.windowScroll).toBe(viewer.scrollLeft);
     viewer.events.length = 0;
     driver.animateTo(500, { durationMs: 300, tauMs: 90 }, () => driver.holdSettledAt(500));
     viewer.animations[1].resolve();
@@ -314,6 +315,7 @@ describe("transform page motion driver", () => {
     expect(viewer.scrollLeft).toBe(500);
     expect(viewer.style.getPropertyValue("width")).toBe("100px");
     expect(driver.active).toBe(false);
+    expect(driver.windowScroll).toBeNull();
   });
 
   it("进入窗口改变了整章宽度（栏位被动）：恢复原几何、报故障并直接落到目标", () => {

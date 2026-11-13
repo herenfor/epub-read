@@ -403,7 +403,7 @@ describe("sanitizeChapter", () => {
     const { html: out } = await sanitizeChapter(html, opts());
 
     expect(out).toMatch(
-      /html, body\s*\{[^}]*height:\s*100%;[^}]*box-sizing:\s*border-box;[^}]*overflow:\s*hidden\s*!important;/s
+      /html, body\s*\{[^}]*height:\s*100%;[^}]*box-sizing:\s*border-box;[^}]*overflow:\s*hidden\s*!important;[^}]*overflow:\s*clip\s*!important;/s
     );
   });
 

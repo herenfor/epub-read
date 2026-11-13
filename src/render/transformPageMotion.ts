@@ -86,6 +86,11 @@ export class TransformPageMotion implements PageMotionDriver {
     return this.windowStart !== null;
   }
 
+  /** 当前窗口模式锁定的逻辑 scrollLeft；未开窗时为 null。 */
+  get windowScroll(): number | null {
+    return Number.isFinite(this.windowStart) ? this.windowStart : null;
+  }
+
   read(): MotionSample {
     // 正常几何下以真实 scrollLeft 为准：两次运动之间可能有跳转/恢复直接改过它。
     if (this.windowStart === null) return { position: readPageScroll(this.viewer, this.progression) };
@@ -316,7 +321,9 @@ export class TransformPageMotion implements PageMotionDriver {
     if (low >= start && high <= start + span) return true;
     const maxStart = Math.max(0, viewer.scrollWidth - viewer.clientWidth);
     const wanted = Math.round((low + high) / 2 - this.windowMid * step);
-    writePageScroll(viewer, Math.max(0, Math.min(maxStart, wanted)), this.progression);
+    const target = Math.max(0, Math.min(maxStart, wanted));
+    this.windowStart = target;
+    writePageScroll(viewer, target, this.progression);
     this.windowStart = readPageScroll(viewer, this.progression);
     this.applyTransform();
     return true;

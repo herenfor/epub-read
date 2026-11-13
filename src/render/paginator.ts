@@ -36,7 +36,7 @@ import { OwnedStylesheetUrls } from "./stylesheetCache";
 import { TEXT_MEASURE, type ReaderSettings, type Theme } from "./settings";
 import { VisibilityGate } from "./displayGate";
 import { hasAuthoredCssProperty } from "./cssRewrite";
-import { clearDocumentSelection, isSelectAllShortcut } from "./selectionGuard";
+import { clearDocumentSelection, isSelectAllShortcut, resetRootScrollOffsets, restorePagedViewerScroll } from "./selectionGuard";
 import { applySearchHighlight, clearSearchHighlight } from "./searchHighlight";
 import {
   buildNoteHighlightCss,
@@ -2861,6 +2861,7 @@ export class ChapterPaginator {
   private pagedSwipe?: PagedSwipeHandlers;
   private onPlainTap?: (tap: PlainTapInfo) => void;
   private shouldIgnorePlainTap?: () => boolean;
+  private expectedPagedScroll: number | null = null;
 
   private readPagedScroll(): number {
     return this.viewer ? readPageScroll(this.viewer, this.flowProgression) : 0;
@@ -2869,7 +2870,22 @@ export class ChapterPaginator {
   private writePagedScroll(value: number): void {
     if (this.viewer) {
       writePageScroll(this.viewer, value, this.flowProgression);
+      this.expectedPagedScroll = this.readPagedScroll();
     }
+  }
+
+  private syncExpectedPagedScroll(): void {
+    this.expectedPagedScroll = this.viewer && !this.scrollMode ? this.readPagedScroll() : null;
+  }
+
+  /** 分页态下重置意外的根/viewer 偏移（如选区拖向边缘触发 Blink 自滚）。 */
+  private guardPagedScroll(): void {
+    if (this.disposed) return;
+    resetRootScrollOffsets(this.contentDoc);
+    if (this.scrollMode || !this.isDisplayReady || this.nativeSnapArmed) return;
+    const motion = this.pageMotion;
+    const expected = motion?.driver.active ? motion.driver.windowScroll : this.expectedPagedScroll;
+    restorePagedViewerScroll(this.viewer, expected, this.flowProgression);
   }
 
   private contentClientOrigin(): number {
@@ -3501,6 +3517,7 @@ export class ChapterPaginator {
     const motion = this.pageMotion;
     if (!motion || !motion.driver.active || motion.session.state.kind !== "idle") return;
     motion.driver.settleTo(motion.driver.read().position);
+    this.syncExpectedPagedScroll();
   }
 
   /** 当前布局的运动会话；前提不满足时返回 null（宿主走旧路径）。 */
@@ -3653,6 +3670,7 @@ export class ChapterPaginator {
     const sample = motion.session.halt();
     const position = sample?.position ?? motion.driver.read().position;
     motion.driver.settleTo(position);
+    this.syncExpectedPagedScroll();
     this.pageMotionPendingChapter = null;
     if (this.pageMotionLivePage !== null) this.adoptedPageUncommitted = true;
     this.pageMotionLivePage = null;
@@ -3678,6 +3696,7 @@ export class ChapterPaginator {
     const page = this.nearestNativeSnapPage() ?? 0;
     const livePage = this.nativeSnapLivePage;
     this.disarmNativeSnap();
+    this.syncExpectedPagedScroll();
     if (offsets.length === 0) return;
     if (page !== this.metrics.currentPage || Math.abs(offsets[page] - left) > 0.5) {
       this.setPage(page, { userInitiated: true });
@@ -4177,6 +4196,7 @@ export class ChapterPaginator {
       this.setPage(Math.max(0, this.metrics.pageCount - 1));
     }
     this.prepareMotion();
+    this.syncExpectedPagedScroll();
     return true;
   }
 
@@ -5055,9 +5075,14 @@ export class ChapterPaginator {
     this.emit(this.readyState(false));
   }
 
-  /** 滚动事件：一帧一次更新位置；真实 scrollTop 变化才关闭弹注。 */
+  /** 滚动事件：分页态阻止根/viewer 意外滚动；滚动模式一帧一次更新位置。 */
   private handleScroll(): void {
-    if (!this.scrollMode || this.disposed) return;
+    if (this.disposed) return;
+    if (!this.scrollMode) {
+      this.guardPagedScroll();
+      return;
+    }
+    resetRootScrollOffsets(this.contentDoc);
     if (this.isProjectingScroll) return;
     const viewer = this.viewer;
     if (!viewer) return;
@@ -7134,6 +7159,8 @@ export class ChapterPaginator {
   }
 
   private handleSelectionChange(): void {
+    if (!this.scrollMode) this.guardPagedScroll();
+    else resetRootScrollOffsets(this.contentDoc);
     if (!this.selectionContextMenuOpen) return;
     const doc = this.contentDoc;
     const viewer = this.viewer;
@@ -10045,6 +10072,7 @@ export class ChapterPaginator {
     this.effectiveColumns = 1;
     this.scrollPageCount = 1;
     this.lastScrollTop = 0;
+    this.expectedPagedScroll = null;
     this.scrollWheelAcc = 0;
     if (this.scrollWheelResetTimer !== undefined) {
       globalThis.clearTimeout(this.scrollWheelResetTimer);

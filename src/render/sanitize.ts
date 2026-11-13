@@ -280,9 +280,9 @@ html, body, #${VIEWER_ID},
     .join("\n");
 
   return [
-    `/* [L1/L3-C21] 正文只由 viewer 分页，不使用根页面原生滚动。
+    `/* [L1/L3-C21] 正文只由 viewer 分页，不使用根页面原生滚动（clip 可防止 Blink 选区拖向边缘时滚动 body）。
    border-box 让书籍 body padding 包含在 100% 高度内，避免短章节也撑出滚动条。 */
-html, body { position: relative; height: 100%; margin: 0 !important; box-sizing: border-box; overflow: hidden !important; }`,
+html, body { position: relative; height: 100%; margin: 0 !important; box-sizing: border-box; overflow: hidden !important; overflow: clip !important; }`,
     // 自定义容器标签不会继承 div 的默认 block display；显式声明也避免改变
     // 作者的 div p / section p 等类型选择器祖先语义。
     `/* [L3-C14] 分页容器使用专用标签，不能以 inline 默认值参与多栏测量。 */

@@ -246,4 +246,40 @@ describe("paginator retained motion window", () => {
     expect(driver.settleTo).toHaveBeenCalledWith(400);
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it("分页态 scroll / selectionchange 会将意外滚动的 body 与 viewer 归位，但不干扰原生吸附手势", () => {
+    const { p } = pagerFixture();
+    p.loadSeq = 1;
+    p.displayReadySeq = 1;
+    p.displayReadyResult = true;
+    p.flowProgression = "ltr";
+    p.settings = { readingMode: "paginated" };
+    p.contentDoc.body = { scrollLeft: 324.5, scrollTop: 0 };
+    p.contentDoc.documentElement.scrollLeft = 18;
+    p.contentDoc.documentElement.scrollTop = 0;
+
+    // 1) 运动窗口打开时以 driver.windowScroll 为准复位漂移
+    p.pageMotion.driver.windowScroll = 200;
+    p.viewer.scrollLeft = 560;
+    p.handleSelectionChange();
+    expect(p.contentDoc.body.scrollLeft).toBe(0);
+    expect(p.contentDoc.documentElement.scrollLeft).toBe(0);
+    expect(p.viewer.scrollLeft).toBe(200);
+
+    // 2) 退出窗口到普通几何后，scroll 事件仍按 expectedPagedScroll 守卫
+    p.pageMotion.driver.active = false;
+    p.pageMotion.driver.windowScroll = null;
+    p.expectedPagedScroll = 400;
+    p.viewer.scrollLeft = 720;
+    p.contentDoc.body.scrollLeft = 90;
+    p.handleScroll();
+    expect(p.contentDoc.body.scrollLeft).toBe(0);
+    expect(p.viewer.scrollLeft).toBe(400);
+
+    // 3) 原生吸附手势进行中不强行覆盖 viewer.scrollLeft
+    p.nativeSnapArmed = true;
+    p.viewer.scrollLeft = 450;
+    p.handleScroll();
+    expect(p.viewer.scrollLeft).toBe(450);
+  });
 });
