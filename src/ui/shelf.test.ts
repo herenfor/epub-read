@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyShelfProgressPatch,
+  deleteShelfBooks,
   filterShelfEntries,
   buildShelfFilterFacets,
   createShelfFilterModel,
@@ -11,8 +12,13 @@ import {
   normalizeShelfLanguage,
   readingAnchorFromShelfEntry,
   shelfIdFor,
+  shelfTimeSegment,
   sortShelfEntries,
+  getShelfStore,
+  setScopedShelfStore,
+  resetShelfStoreForTest,
   type ShelfEntry,
+  type ShelfStore,
 } from "./shelf";
 import { hasReadPosition } from "./readEvidence";
 
@@ -204,5 +210,71 @@ describe("progress entry merge", () => {
       anchorTextSnippet: null,
       mediaAnchor,
     });
+  });
+});
+
+describe("shelfTimeSegment", () => {
+  const now = new Date(2026, 7, 23, 12).getTime();
+  const day = 24 * 60 * 60 * 1000;
+
+  it("uses local day boundaries and mutually exclusive buckets", () => {
+    expect(shelfTimeSegment(now, now)).toBe("today");
+    expect(shelfTimeSegment(new Date(2026, 7, 22, 23, 59).getTime(), now)).toBe("last7Days");
+    expect(shelfTimeSegment(now - 10 * day, now)).toBe("last30Days");
+    expect(shelfTimeSegment(new Date(2026, 5, 1).getTime(), now)).toBe("thisYear");
+    expect(shelfTimeSegment(0, now)).toBe("older");
+    expect(shelfTimeSegment(Number.NaN, now)).toBe("older");
+  });
+});
+
+describe("deleteShelfBooks", () => {
+  it("deduplicates ids and uses batch deletion when available", async () => {
+    const batches: string[][] = [];
+    const store: Pick<ShelfStore, "deleteBook" | "deleteBooks"> = {
+      deleteBook: async () => {},
+      deleteBooks: async (ids) => { batches.push(ids); },
+    };
+    const result = await deleteShelfBooks(store, ["a", "a", "b"]);
+    expect(batches).toEqual([["a", "b"]]);
+    expect(result).toEqual({ deleted: ["a", "b"], failed: [] });
+  });
+
+  it("reports every id as failed when batch deletion throws", async () => {
+    const store: Pick<ShelfStore, "deleteBook" | "deleteBooks"> = {
+      deleteBook: async () => {},
+      deleteBooks: async () => { throw new Error("native batch failed"); },
+    };
+    const result = await deleteShelfBooks(store, ["a", "b"]);
+    expect(result.deleted).toEqual([]);
+    expect(result.failed.map((item) => item.id)).toEqual(["a", "b"]);
+    expect(result.failed[0].error).toContain("native batch failed");
+  });
+
+  it("falls back to per-book deletion and keeps partial failures", async () => {
+    const store: Pick<ShelfStore, "deleteBook"> = {
+      deleteBook: async (id) => { if (id === "b") throw new Error("missing"); },
+    };
+    const result = await deleteShelfBooks(store, ["a", "b", "a"]);
+    expect(result.deleted).toEqual(["a"]);
+    expect(result.failed.map((item) => item.id)).toEqual(["b"]);
+  });
+
+  it("does not touch the store for an empty request", async () => {
+    let called = 0;
+    const store: Pick<ShelfStore, "deleteBook"> = {
+      deleteBook: async () => { called += 1; },
+    };
+    await expect(deleteShelfBooks(store, [])).resolves.toEqual({ deleted: [], failed: [] });
+    expect(called).toBe(0);
+  });
+});
+
+describe("scoped shelf store", () => {
+  it("returns the scoped store until it is cleared", () => {
+    const scoped = { list: async () => [] } as unknown as ShelfStore;
+    setScopedShelfStore(scoped);
+    expect(getShelfStore()).toBe(scoped);
+    setScopedShelfStore(null);
+    resetShelfStoreForTest();
   });
 });
